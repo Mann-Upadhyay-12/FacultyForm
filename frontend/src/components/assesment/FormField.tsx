@@ -1,130 +1,103 @@
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { Pencil, Check, HelpCircle } from 'lucide-react';
 import React from 'react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { HelpCircle, Sparkles } from 'lucide-react';
+import type { Option } from '@/types/formTypes';
 
-export interface SelectOption {
-  label: string;
-  value: string;
-}
+export type SelectOption = Option;
 
 export interface FormFieldProps {
   label: string;
   value: string;
-  placeholder?: string;
-  isEditing: boolean;
-  onEdit: () => void;
   onChange: (value: string) => void;
+  placeholder?: string;
+  type?: 'text' | 'email' | 'date' | 'number' | 'select' | 'radio' | 'textarea';
+  /** @deprecated use type="textarea" */
   multiline?: boolean;
-  type?: 'text' | 'date' | 'number' | 'select' | 'radio';
-  options?: SelectOption[];
+  options?: Option[];
+  /** Free-text with typeahead suggestions (renders a <datalist>). */
+  suggestions?: string[];
   tooltip?: string;
+  hint?: React.ReactNode;
+  error?: string;
   required?: boolean;
+  min?: number;
+  max?: number;
+  step?: number | 'any';
   className?: string;
+  /** Wide fields span both columns of a .field-grid. */
+  wide?: boolean;
 }
 
 export function FormField({
   label,
   value,
-  placeholder = '',
-  isEditing,
-  onEdit,
   onChange,
-  multiline = false,
+  placeholder = '',
   type = 'text',
+  multiline = false,
   options = [],
+  suggestions,
   tooltip,
+  hint,
+  error,
   required = false,
-  className = ''
+  min,
+  max,
+  step,
+  className = '',
+  wide = false,
 }: FormFieldProps) {
-  const inputId = React.useId();
+  const id = React.useId();
+  const listId = suggestions ? `${id}-list` : undefined;
+  const describedBy = error ? `${id}-err` : hint ? `${id}-hint` : undefined;
+  const kind = multiline ? 'textarea' : type;
 
-  // Find human-readable label for select/radio when in view mode
-  const displayValue = React.useMemo(() => {
-    if (!value) return '';
-    if ((type === 'select' || type === 'radio') && options.length > 0) {
-      const matched = options.find((opt) => opt.value === value);
-      if (matched) return matched.label;
-    }
-    return value;
-  }, [value, type, options]);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !multiline && isEditing) {
-      e.preventDefault();
-      onEdit();
-    } else if (e.key === 'Escape' && isEditing) {
-      e.preventDefault();
-      onEdit();
-    }
+  const common = {
+    id,
+    'aria-invalid': error ? true : undefined,
+    'aria-describedby': describedBy,
+    'aria-required': required || undefined,
   };
 
   const renderInput = () => {
-    if (type === 'select' && options.length > 0) {
+    if (kind === 'select') {
       return (
-        <Select value={value} onValueChange={onChange}>
-          <SelectTrigger id={inputId} className="w-full bg-background border-slate-300 focus:border-[#1e3a5f] focus:ring-1 focus:ring-[#1e3a5f]">
-            <SelectValue placeholder={placeholder || 'Select an option'} />
-          </SelectTrigger>
-          <SelectContent className="bg-popover border border-border z-50 shadow-md">
-            {options.map((option) => (
-              <SelectItem 
-                key={option.value} 
-                value={option.value}
-                className="cursor-pointer hover:bg-slate-100"
-              >
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <select
+          {...common}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={`ff-input ff-select ${value ? '' : 'is-empty'}`}
+        >
+          <option value="">{placeholder || 'Select…'}</option>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+          {/* Keep legacy / imported values visible instead of silently blanking them */}
+          {value && !options.some((o) => o.value === value) && <option value={value}>{value}</option>}
+        </select>
       );
     }
 
-    if (type === 'radio' && options.length > 0) {
+    if (kind === 'radio') {
       return (
-        <div className="flex flex-wrap gap-2 pt-1" role="radiogroup" aria-labelledby={inputId}>
-          {options.map((option) => {
-            const isChecked = value === option.value;
+        <div className="ff-radio-group" role="radiogroup" aria-labelledby={`${id}-label`} aria-describedby={describedBy}>
+          {options.map((o) => {
+            const checked = value === o.value;
             return (
-              <label
-                key={option.value}
-                className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium cursor-pointer transition-all ${
-                  isChecked
-                    ? 'border-[#1e3a5f] bg-[#1e3a5f]/10 text-[#1e3a5f] shadow-xs'
-                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-                }`}
-              >
+              <label key={o.value} className={`ff-radio ${checked ? 'is-checked' : ''}`}>
                 <input
                   type="radio"
-                  name={inputId}
-                  value={option.value}
-                  checked={isChecked}
+                  name={id}
+                  value={o.value}
+                  checked={checked}
                   onChange={(e) => onChange(e.target.value)}
+                  onClick={() => checked && onChange('')}
                   className="sr-only"
                 />
-                <span
-                  className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${
-                    isChecked ? 'border-[#1e3a5f]' : 'border-slate-400'
-                  }`}
-                >
-                  {isChecked && <span className="w-2 h-2 rounded-full bg-[#1e3a5f]" />}
-                </span>
-                <span>{option.label}</span>
+                <span className="ff-radio-dot" aria-hidden="true" />
+                <span>{o.label}</span>
               </label>
             );
           })}
@@ -132,104 +105,126 @@ export function FormField({
       );
     }
 
-    if (multiline) {
+    if (kind === 'textarea') {
       return (
-        <Textarea
-          id={inputId}
+        <textarea
+          {...common}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="min-h-[85px] bg-background border-slate-300 focus:border-[#1e3a5f] focus:ring-1 focus:ring-[#1e3a5f] resize-y"
           rows={3}
+          className="ff-input ff-textarea"
         />
       );
     }
 
     return (
-      <Input
-        id={inputId}
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder}
-        className="bg-background border-slate-300 focus:border-[#1e3a5f] focus:ring-1 focus:ring-[#1e3a5f]"
-      />
+      <>
+        <input
+          {...common}
+          type={kind}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onWheel={kind === 'number' ? (e) => (e.target as HTMLInputElement).blur() : undefined}
+          placeholder={placeholder}
+          min={min}
+          max={kind === 'date' && max === undefined ? new Date().toISOString().slice(0, 10) : max}
+          step={step}
+          inputMode={kind === 'number' ? 'decimal' : undefined}
+          list={listId}
+          className="ff-input"
+        />
+        {suggestions && (
+          <datalist id={listId}>
+            {suggestions.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+        )}
+      </>
     );
   };
 
   return (
-    <div className={`space-y-1.5 ${className}`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Label htmlFor={inputId} className="text-sm font-semibold text-slate-700 cursor-pointer">
-            {label}
-            {required && <span className="text-rose-600 ml-1 font-bold">*</span>}
-          </Label>
-          {tooltip && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  className="text-slate-400 hover:text-slate-600 inline-flex items-center focus:outline-hidden"
-                  aria-label={`Info about ${label}`}
-                >
-                  <HelpCircle className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-xs bg-slate-900 text-white text-xs p-2 rounded shadow-lg z-50">
-                <p>{tooltip}</p>
-              </TooltipContent>
-            </Tooltip>
+    <div className={`ff-field ${wide || kind === 'textarea' || kind === 'radio' ? 'is-wide' : ''} ${className}`}>
+      <div className="ff-label-row">
+        <label id={`${id}-label`} htmlFor={kind === 'radio' ? undefined : id} className="ff-label">
+          {label}
+          {required && (
+            <span className="ff-required" aria-hidden="true">
+              *
+            </span>
           )}
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onEdit}
-          className={`h-7 px-2 text-xs font-medium rounded-md transition-colors ${
-            isEditing
-              ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 hover:text-emerald-800'
-              : 'text-slate-600 hover:text-[#1e3a5f] hover:bg-slate-100'
-          }`}
-          aria-label={isEditing ? `Save ${label}` : `Edit ${label}`}
-        >
-          {isEditing ? (
-            <>
-              <Check className="h-3.5 w-3.5 mr-1 text-emerald-600" />
-              <span>Save</span>
-            </>
-          ) : (
-            <>
-              <Pencil className="h-3 w-3 mr-1" />
-              <span>Edit</span>
-            </>
-          )}
-        </Button>
+        </label>
+        {tooltip && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="ff-help" aria-label={`About ${label}`}>
+                <HelpCircle className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs bg-slate-900 text-white text-xs p-2 rounded shadow-lg z-50">
+              <p>{tooltip}</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
+      {renderInput()}
+      {error ? (
+        <p id={`${id}-err`} className="ff-error" role="alert">
+          {error}
+        </p>
+      ) : hint ? (
+        <p id={`${id}-hint`} className="ff-hint">
+          {hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
-      {isEditing ? (
-        renderInput()
-      ) : (
-        <div
-          onClick={onEdit}
-          title="Click to edit"
-          tabIndex={0}
-          role="button"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              onEdit();
-            }
-          }}
-          className="group py-2 px-3 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 rounded-md min-h-[38px] flex items-center justify-between cursor-pointer transition-all focus:outline-hidden focus:ring-2 focus:ring-[#1e3a5f]/40"
-        >
-          <p className={`text-sm leading-relaxed ${displayValue ? 'text-slate-800 font-medium' : 'text-slate-400 italic'}`}>
-            {displayValue || placeholder || 'Not provided — click to enter'}
-          </p>
-          <Pencil className="h-3.5 w-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0" />
-        </div>
+interface ApiFieldProps {
+  value: string;
+  onChange: (value: string) => void;
+  /** Points the rules give for this entry, or null if they don't fix a number. */
+  suggested?: number | null;
+  label?: string;
+  max?: number;
+  hint?: React.ReactNode;
+  className?: string;
+}
+
+/** Numeric self-assessed API score with an optional "use suggested" chip. */
+export function ApiField({ value, onChange, suggested, label = 'Self-assessed API score', max, hint, className }: ApiFieldProps) {
+  const n = value === '' ? null : Number(value);
+  const error =
+    n !== null && (!Number.isFinite(n) || n < 0)
+      ? 'Enter a positive number.'
+      : max !== undefined && n !== null && n > max
+        ? `Maximum allowed is ${max}.`
+        : undefined;
+
+  const showSuggestion = suggested !== undefined && suggested !== null && String(suggested) !== value;
+
+  return (
+    <div className={`ff-api ${className ?? ''}`}>
+      <FormField
+        label={label}
+        type="number"
+        value={value}
+        onChange={onChange}
+        min={0}
+        max={max}
+        step="any"
+        placeholder={max !== undefined ? `0 – ${max}` : 'Points'}
+        error={error}
+        hint={hint}
+      />
+      {showSuggestion && (
+        <button type="button" className="ff-suggest" onClick={() => onChange(String(suggested))}>
+          <Sparkles className="h-3 w-3" aria-hidden="true" />
+          As per rules: <strong>{suggested}</strong> — use this
+        </button>
       )}
     </div>
   );

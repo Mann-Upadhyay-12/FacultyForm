@@ -1,93 +1,44 @@
-import { FormField } from '@/components/assesment/FormField';
+import { ApiField, FormField } from '@/components/assesment/FormField';
+import { PointsBadge, RepeatableList, SectionTotal } from '@/components/assesment/RepeatableList';
 import { useFormContext } from '@/context/FormContext';
-import { levelOptions, statusOptions } from '@/types/formTypes';
+import { suggestGuidance } from '@/lib/scoring';
+import { levelOptions, statusOptions, templates } from '@/types/formTypes';
 
 export default function GuidancePage() {
-  const { formData, isEditing, handleEdit, handleArrayChange, addArrayItem, removeArrayItem } = useFormContext();
+  const { apiScores } = useFormContext();
 
   return (
     <div>
       <h2 className="page-title">Research Guidance</h2>
-      
+      <p className="subtitle">Item 17</p>
+
       <div className="info-message">
-        <strong>API Points:</strong><br/>
-        • M.Tech/M.Phil/D.D./M.S. degree awarded: 5 points<br/>
-        • Ph.D. degree awarded: 10 points<br/>
-        • Ph.D. Thesis submitted: 7 points<br/>
-        • Ongoing Ph.D. (&gt;6 months): 3 points<br/>
-        <strong>Joint guidance:</strong> Share as per book authorship rules
+        <strong>API points</strong>
+        <br />• M.Tech / M.Phil / D.D. / M.S. degree awarded: 5
+        <br />• Ph.D. degree awarded: 10 · Ph.D. thesis submitted: 7 · Ongoing Ph.D. (&gt;6 months): 3
+        <br />
+        <strong>Joint guidance:</strong> shared as per book authorship rules.
       </div>
 
-      {formData.guidance.map((guide, index) => (
-        <div key={index} className="project-entry">
-          <h4>Guidance {index + 1}</h4>
-          <FormField
-            label="Enrol. No. & Name of the Student"
-            value={guide.enrolName}
-            placeholder="e.g., 2020PhD1234 - Mr. John Doe"
-            isEditing={isEditing[`guide-enrol-${index}`]}
-            onEdit={() => handleEdit(`guide-enrol-${index}`)}
-            onChange={(val) => handleArrayChange('guidance', index, 'enrolName', val)}
-          />
-          <FormField
-            label="Title of Thesis/Dissertation/Project"
-            value={guide.title}
-            placeholder="Enter title"
-            multiline
-            isEditing={isEditing[`guide-title-${index}`]}
-            onEdit={() => handleEdit(`guide-title-${index}`)}
-            onChange={(val) => handleArrayChange('guidance', index, 'title', val)}
-          />
-          <FormField
-            label="Names of Joint Supervisors"
-            value={guide.jointSupervisors}
-            placeholder="Enter names or NA"
-            isEditing={isEditing[`guide-joint-${index}`]}
-            onEdit={() => handleEdit(`guide-joint-${index}`)}
-            onChange={(val) => handleArrayChange('guidance', index, 'jointSupervisors', val)}
-          />
-          <FormField
-            label="Level"
-            value={guide.level}
-            placeholder="Select level"
-            isEditing={isEditing[`guide-level-${index}`]}
-            onEdit={() => handleEdit(`guide-level-${index}`)}
-            onChange={(val) => handleArrayChange('guidance', index, 'level', val)}
-            type="select"
-            options={levelOptions}
-          />
-          <FormField
-            label="Status"
-            value={guide.status}
-            placeholder="Select status"
-            isEditing={isEditing[`guide-status-${index}`]}
-            onEdit={() => handleEdit(`guide-status-${index}`)}
-            onChange={(val) => handleArrayChange('guidance', index, 'status', val)}
-            type="radio"
-            options={statusOptions}
-          />
-          <FormField
-            label="Self-Assessed API Score"
-            value={guide.api}
-            placeholder="Enter API"
-            isEditing={isEditing[`guide-api-${index}`]}
-            onEdit={() => handleEdit(`guide-api-${index}`)}
-            onChange={(val) => handleArrayChange('guidance', index, 'api', val)}
-          />
-          {index > 0 && (
-            <button type="button" onClick={() => removeArrayItem('guidance', index)} className="remove-button">
-              Remove
-            </button>
-          )}
-        </div>
-      ))}
-      <button
-        type="button"
-        onClick={() => addArrayItem('guidance', { enrolName: '', title: '', jointSupervisors: '', level: '', status: '', api: '' })}
-        className="add-button"
-      >
-        + Add Research Guidance
-      </button>
+      <RepeatableList name="guidance" template={templates.guidance} itemLabel="Student" badge={(r) => <PointsBadge value={r.api} />}>
+        {(g, _i, set) => (
+          <>
+            <FormField label="Enrolment no. & name of the student" value={g.enrolName} placeholder="e.g., 236HS001 – Ms. Priya Thakur" onChange={(v) => set('enrolName', v)} wide />
+            <FormField label="Title of thesis / dissertation / project" type="textarea" value={g.title} placeholder="Title" onChange={(v) => set('title', v)} />
+            <FormField label="Joint supervisors" value={g.jointSupervisors} placeholder="Names, or NA" onChange={(v) => set('jointSupervisors', v)} />
+            <FormField label="Level" type="select" value={g.level} options={levelOptions} onChange={(v) => set('level', v)} />
+            <FormField label="Status" type="radio" value={g.status} options={statusOptions} onChange={(v) => set('status', v)} />
+            <ApiField
+              value={g.api}
+              onChange={(v) => set('api', v)}
+              suggested={suggestGuidance(g)}
+              hint={g.jointSupervisors && !/^na$/i.test(g.jointSupervisors.trim()) ? 'Joint guidance — apply your share.' : undefined}
+            />
+          </>
+        )}
+      </RepeatableList>
+
+      <SectionTotal label="Item 17 total" claimed={apiScores.byKey.guidance.claimed} />
     </div>
   );
 }

@@ -1,170 +1,107 @@
+import { ApiField, FormField } from '@/components/assesment/FormField';
+import { SectionTotal } from '@/components/assesment/RepeatableList';
+import { useFormContext, NestedKey } from '@/context/FormContext';
+import { CAPS, num } from '@/lib/scoring';
 
-import { FormField } from '@/components/assesment/FormField';
-import { useFormContext } from '@/context/FormContext';
+const TERMS = ['t1', 't2', 't3'] as const;
+const TERM_LABEL = { t1: 'T1', t2: 'T2', t3: 'T3' };
+
+function CountInput({ label, value, onChange, error }: { label: string; value: string; onChange: (v: string) => void; error?: string }) {
+  return <FormField label={label} type="number" min={0} step={1} value={value} placeholder="0" onChange={onChange} error={error} />;
+}
 
 export default function ExaminationPage() {
-  const { formData, isEditing, handleEdit, handleChange, handleNestedChange } = useFormContext();
+  const { formData, handleChange, handleNestedChange, apiScores } = useFormContext();
+  const nested = (section: NestedKey, sub: string, key = '') => (v: string) => handleNestedChange(section, sub, key, v);
+  const score = apiScores.byKey.examination;
 
   return (
     <div>
-      <h2 className="page-title">Examination and Evaluation Duties</h2>
-      
-      <div className="info-message">
-        API Score for items 12.3 & 12.4 combined is limited to maximum 30 points.
+      <h2 className="page-title">Project Guidance & Examination Duties</h2>
+      <p className="subtitle">Items 12.3 – 12.4. The combined API for these two items is limited to {CAPS.examPlusGuidance} points.</p>
+
+      <h3 className="section-title">Project guidance at UG level (12.3)</h3>
+      <div className="field-grid">
+        <CountInput label="Number of projects guided" value={formData.projectsGuided} onChange={(v) => handleChange('projectsGuided', v)} />
+        <CountInput label="Number of students guided" value={formData.studentsGuided} onChange={(v) => handleChange('studentsGuided', v)} />
+        <ApiField label="Self-assessed API for 12.3" value={formData.projectGuidanceApi} onChange={(v) => handleChange('projectGuidanceApi', v)} max={CAPS.projectGuidance} />
       </div>
 
-      <h3 className="section-title">No. of Question Papers Set</h3>
-      <div className="course-fields">
-        <FormField
-          label="UG T1"
-          value={formData.questionPapersSet.ug.t1}
-          placeholder="Enter number"
-          isEditing={isEditing['qps-ug-t1']}
-          onEdit={() => handleEdit('qps-ug-t1')}
-          onChange={(val) => handleNestedChange('questionPapersSet', 'ug', 't1', val)}
-        />
-        <FormField
-          label="UG T2"
-          value={formData.questionPapersSet.ug.t2}
-          placeholder="Enter number"
-          isEditing={isEditing['qps-ug-t2']}
-          onEdit={() => handleEdit('qps-ug-t2')}
-          onChange={(val) => handleNestedChange('questionPapersSet', 'ug', 't2', val)}
-        />
-        <FormField
-          label="UG T3"
-          value={formData.questionPapersSet.ug.t3}
-          placeholder="Enter number"
-          isEditing={isEditing['qps-ug-t3']}
-          onEdit={() => handleEdit('qps-ug-t3')}
-          onChange={(val) => handleNestedChange('questionPapersSet', 'ug', 't3', val)}
-        />
-        <FormField
-          label="PG T1"
-          value={formData.questionPapersSet.pg.t1}
-          placeholder="Enter number"
-          isEditing={isEditing['qps-pg-t1']}
-          onEdit={() => handleEdit('qps-pg-t1')}
-          onChange={(val) => handleNestedChange('questionPapersSet', 'pg', 't1', val)}
-        />
-        <FormField
-          label="PG T2"
-          value={formData.questionPapersSet.pg.t2}
-          placeholder="Enter number"
-          isEditing={isEditing['qps-pg-t2']}
-          onEdit={() => handleEdit('qps-pg-t2')}
-          onChange={(val) => handleNestedChange('questionPapersSet', 'pg', 't2', val)}
-        />
-        <FormField
-          label="PG T3"
-          value={formData.questionPapersSet.pg.t3}
-          placeholder="Enter number"
-          isEditing={isEditing['qps-pg-t3']}
-          onEdit={() => handleEdit('qps-pg-t3')}
-          onChange={(val) => handleNestedChange('questionPapersSet', 'pg', 't3', val)}
-        />
+      <h3 className="section-title">Question papers set (12.4)</h3>
+      <div className="exam-table">
+        <div className="exam-row exam-head">
+          <span />
+          {TERMS.map((t) => (
+            <span key={t}>{TERM_LABEL[t]}</span>
+          ))}
+        </div>
+        {(['ug', 'pg'] as const).map((lvl) => (
+          <div className="exam-row" key={lvl}>
+            <span className="exam-row-label">{lvl.toUpperCase()}</span>
+            {TERMS.map((t) => (
+              <CountInput
+                key={t}
+                label={`${lvl.toUpperCase()} ${TERM_LABEL[t]}`}
+                value={formData.questionPapersSet[lvl][t]}
+                onChange={nested('questionPapersSet', lvl, t)}
+              />
+            ))}
+          </div>
+        ))}
       </div>
 
-      <h3 className="section-title">No. of A/B Evaluated</h3>
-      <div className="course-fields">
-        <FormField
-          label="UG"
-          value={formData.abEvaluated.ug}
-          placeholder="Enter number"
-          isEditing={isEditing['ab-ug']}
-          onEdit={() => handleEdit('ab-ug')}
-          onChange={(val) => handleNestedChange('abEvaluated', 'ug', '', val)}
-        />
-        <FormField
-          label="PG"
-          value={formData.abEvaluated.pg}
-          placeholder="Enter number"
-          isEditing={isEditing['ab-pg']}
-          onEdit={() => handleEdit('ab-pg')}
-          onChange={(val) => handleNestedChange('abEvaluated', 'pg', '', val)}
-        />
+      <h3 className="section-title">Answer books evaluated</h3>
+      <div className="field-grid">
+        <CountInput label="UG answer books" value={formData.abEvaluated.ug} onChange={nested('abEvaluated', 'ug')} />
+        <CountInput label="PG answer books" value={formData.abEvaluated.pg} onChange={nested('abEvaluated', 'pg')} />
       </div>
 
-      <h3 className="section-title">No. of Students Examined (Practical/Seminar/Project)</h3>
-      <div className="course-fields">
-        <FormField
-          label="UG"
-          value={formData.studentsExamined.ug}
-          placeholder="Enter number"
-          isEditing={isEditing['se-ug']}
-          onEdit={() => handleEdit('se-ug')}
-          onChange={(val) => handleNestedChange('studentsExamined', 'ug', '', val)}
-        />
-        <FormField
-          label="PG"
-          value={formData.studentsExamined.pg}
-          placeholder="Enter number"
-          isEditing={isEditing['se-pg']}
-          onEdit={() => handleEdit('se-pg')}
-          onChange={(val) => handleNestedChange('studentsExamined', 'pg', '', val)}
+      <h3 className="section-title">Students examined (practical / seminar / project / viva)</h3>
+      <div className="field-grid">
+        <CountInput label="UG students" value={formData.studentsExamined.ug} onChange={nested('studentsExamined', 'ug')} />
+        <CountInput label="PG students" value={formData.studentsExamined.pg} onChange={nested('studentsExamined', 'pg')} />
+      </div>
+
+      <h3 className="section-title">Examination invigilation duties</h3>
+      <div className="exam-table">
+        <div className="exam-row exam-head">
+          <span />
+          {TERMS.map((t) => (
+            <span key={t}>{TERM_LABEL[t]}</span>
+          ))}
+        </div>
+        {(['allotted', 'performed'] as const).map((row) => (
+          <div className="exam-row" key={row}>
+            <span className="exam-row-label">{row === 'allotted' ? 'Allotted' : 'Performed'}</span>
+            {TERMS.map((t) => {
+              const over =
+                row === 'performed' &&
+                num(formData.invigilation.allotted[t]) > 0 &&
+                num(formData.invigilation.performed[t]) > num(formData.invigilation.allotted[t]);
+              return (
+                <CountInput
+                  key={t}
+                  label={`${row === 'allotted' ? 'Allotted' : 'Performed'} ${TERM_LABEL[t]}`}
+                  value={formData.invigilation[row][t]}
+                  onChange={nested('invigilation', row, t)}
+                  error={over ? 'More than allotted' : undefined}
+                />
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      <div className="field-grid">
+        <ApiField
+          label="Self-assessed API for examination duties (12.4)"
+          value={formData.examinationApi}
+          onChange={(v) => handleChange('examinationApi', v)}
+          max={CAPS.examPlusGuidance}
         />
       </div>
 
-      <h3 className="section-title">No. of Examination Invigilation Duties</h3>
-      <div className="course-fields">
-        <FormField
-          label="Allotted T1"
-          value={formData.invigilation.allotted.t1}
-          placeholder="Enter number"
-          isEditing={isEditing['inv-all-t1']}
-          onEdit={() => handleEdit('inv-all-t1')}
-          onChange={(val) => handleNestedChange('invigilation', 'allotted', 't1', val)}
-        />
-        <FormField
-          label="Allotted T2"
-          value={formData.invigilation.allotted.t2}
-          placeholder="Enter number"
-          isEditing={isEditing['inv-all-t2']}
-          onEdit={() => handleEdit('inv-all-t2')}
-          onChange={(val) => handleNestedChange('invigilation', 'allotted', 't2', val)}
-        />
-        <FormField
-          label="Allotted T3"
-          value={formData.invigilation.allotted.t3}
-          placeholder="Enter number"
-          isEditing={isEditing['inv-all-t3']}
-          onEdit={() => handleEdit('inv-all-t3')}
-          onChange={(val) => handleNestedChange('invigilation', 'allotted', 't3', val)}
-        />
-        <FormField
-          label="Performed T1"
-          value={formData.invigilation.performed.t1}
-          placeholder="Enter number"
-          isEditing={isEditing['inv-per-t1']}
-          onEdit={() => handleEdit('inv-per-t1')}
-          onChange={(val) => handleNestedChange('invigilation', 'performed', 't1', val)}
-        />
-        <FormField
-          label="Performed T2"
-          value={formData.invigilation.performed.t2}
-          placeholder="Enter number"
-          isEditing={isEditing['inv-per-t2']}
-          onEdit={() => handleEdit('inv-per-t2')}
-          onChange={(val) => handleNestedChange('invigilation', 'performed', 't2', val)}
-        />
-        <FormField
-          label="Performed T3"
-          value={formData.invigilation.performed.t3}
-          placeholder="Enter number"
-          isEditing={isEditing['inv-per-t3']}
-          onEdit={() => handleEdit('inv-per-t3')}
-          onChange={(val) => handleNestedChange('invigilation', 'performed', 't3', val)}
-        />
-      </div>
-
-      <FormField
-        label="Self-Assessed API Score for Examination"
-        value={formData.examinationApi}
-        placeholder="Enter API score (max 30 combined with 12.3)"
-        isEditing={isEditing.examinationApi}
-        onEdit={() => handleEdit('examinationApi')}
-        onChange={(val) => handleChange('examinationApi', val)}
-      />
+      <SectionTotal label="Items 12.3 + 12.4" claimed={score.claimed} counted={score.counted} cap={CAPS.examPlusGuidance} />
     </div>
   );
 }

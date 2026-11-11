@@ -10,8 +10,8 @@ services:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      - REACT_APP_API_URL=http://localhost:5000
-      - REACT_APP_WS_URL=http://localhost:8005
+      - VITE_API_URL=http://localhost:5000
+      - VITE_WS_URL=http://localhost:8005
     networks:
       - lab_network
     # Temporarily remove depends_on for initial test
