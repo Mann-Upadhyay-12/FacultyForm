@@ -1,0 +1,78 @@
+# Dependencies
+node_modules/
+vendor/
+.pnp
+.pnp.js
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+
+# Build outputs & caches
+build/
+dist/
+out/
+.next/
+*.exe
+.cache/
+.parcel-cache/
+.turbo/
+*.tsbuildinfo
+
+# Archives and compressed bundles
+*.tar.gz
+*.tgz
+*.zip
+*.rar
+*.7z
+*.gz
+
+# Temporary & backup files
+*.bak
+*.backup
+*.old
+*.tmp
+*.temp
+*~
+
+# Scratch & test dumps
+x
+frontend/x
+frontend/src/x
+
+# IDE & editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs & debug
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Database & local data
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker
+.docker/
+
+# Coverage & test reports
+coverage/
+.nyc_output/
