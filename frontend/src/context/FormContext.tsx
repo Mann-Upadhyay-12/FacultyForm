@@ -151,6 +151,12 @@ export function FormProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('beforeunload', flush);
   }, []);
 
+  // Free hosting tiers put the API to sleep when idle; waking it now means
+  // it's ready by the time the teacher submits.
+  useEffect(() => {
+    if (API_URL) fetch(`${API_URL}/health`, { mode: 'cors' }).catch(() => {});
+  }, []);
+
   const handleChange = useCallback((field: StringKey, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   }, []);
