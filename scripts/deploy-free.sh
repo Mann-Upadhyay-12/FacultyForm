@@ -98,6 +98,7 @@ render_env_json() {
       DB_SSL_VERIFY: e.DB_SSL_VERIFY || "true",
       ADMIN_API_KEY: e.ADMIN_API_KEY,
       ALLOWED_ORIGINS: e.ALLOWED_ORIGINS,
+      ...(e.SESSION_TTL_DAYS ? { SESSION_TTL_DAYS: e.SESSION_TTL_DAYS } : {}),
     };
     process.stdout.write(JSON.stringify(Object.entries(vars).map(([key, value]) => ({ key, value }))));
   '
@@ -225,4 +226,6 @@ printf '\n%s%sDeployed!%s\n' "$C_BLD" "$C_GRN" "$C_OFF"
 printf '  Form:        %s\n' "$FRONTEND_URL"
 printf '  API:         %s   (first request after 15 min idle takes ~50 s)\n' "$API_URL"
 printf '  Submissions: curl -H "x-admin-key: $ADMIN_API_KEY" %s/api/assessments\n' "$API_URL"
-printf '               (ADMIN_API_KEY is in your .env)\n\n'
+printf '               (ADMIN_API_KEY is in your .env)\n'
+printf '  Teachers:    open the form, Sign up once, then log in. Promote an admin with SQL:\n'
+printf "               UPDATE users SET role = 'admin' WHERE email = 'someone@juit.ac.in';\n\n"

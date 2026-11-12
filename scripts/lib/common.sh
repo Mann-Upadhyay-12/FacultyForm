@@ -194,13 +194,23 @@ smoke_test() {
   if [ "$_h" = 200 ]; then ok "API health: $(cat "$TMP_DIR/health")"; else warn "API health returned $_h: $(cat "$TMP_DIR/health" 2>/dev/null)"; fi
 
   _c=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' -X OPTIONS -H "Origin: $_fe" \
-    -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' \
+    -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: authorization,content-type' \
     "$_api/api/assessments" || true)
   case $_c in 2??) ok "CORS allows $_fe" ;; *) warn "CORS preflight from $_fe returned $_c" ;; esac
 
   _a=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' "$_api/api/assessments" || true)
   [ "$_a" = 401 ] && ok "Submission list is protected by ADMIN_API_KEY" || warn "GET /api/assessments without key returned $_a (expected 401)"
 
+  # An empty login is rejected with 400 when accounts work, 503 when the database isn't reachable.
+  _l=$(curl -sS -m 30 -o "$TMP_DIR/login" -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+    -d '{}' "$_api/api/auth/login" || true)
+  case $_l in
+    400) ok "Login API is up (accounts database reachable)" ;;
+    *) warn "POST /api/auth/login returned $_l (expected 400): $(cat "$TMP_DIR/login" 2>/dev/null)" ;;
+  esac
+
   _f=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' "$_fe/form/personal" || true)
   [ "$_f" = 200 ] && ok "Frontend is serving ($_fe)" || warn "Frontend returned $_f (a new CDN can take a few minutes)"
+  _lp=$(curl -sS -m 30 -o /dev/null -w '%{http_code}' "$_fe/login" || true)
+  [ "$_lp" = 200 ] && ok "Login page is serving" || warn "Login page returned $_lp"
 }
