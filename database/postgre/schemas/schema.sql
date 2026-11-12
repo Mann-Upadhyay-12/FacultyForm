@@ -8,11 +8,28 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     first_name VARCHAR(100),
     last_name VARCHAR(100),
-    role VARCHAR(50) NOT NULL CHECK (role IN ('student', 'faculty', 'lab_manager', 'admin')),
+    -- Everyone who signs up is a teacher ('faculty'). Promote admins manually:
+    --   UPDATE users SET role = 'admin' WHERE email = 'someone@juit.ac.in';
+    role VARCHAR(50) NOT NULL DEFAULT 'faculty' CHECK (role IN ('student', 'faculty', 'lab_manager', 'admin')),
     university_id VARCHAR(50),
+    last_login_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email));
+
+-- Login sessions (only a SHA-256 of each session token is stored)
+CREATE TABLE user_sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    user_agent TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
 
 -- Faculty Self Assessment Submissions table
 CREATE TABLE faculty_assessments (
@@ -36,6 +53,8 @@ CREATE TABLE faculty_assessments (
 
 -- Indexes for performance and query optimization
 CREATE INDEX IF NOT EXISTS idx_faculty_assessments_user_id ON faculty_assessments(user_id);
+-- One assessment per teacher per academic year (re-submitting updates it)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_faculty_assessments_user_year ON faculty_assessments(user_id, academic_year);
 CREATE INDEX IF NOT EXISTS idx_faculty_assessments_year ON faculty_assessments(academic_year);
 CREATE INDEX IF NOT EXISTS idx_faculty_assessments_dept ON faculty_assessments(department);
 CREATE INDEX IF NOT EXISTS idx_faculty_assessments_status ON faculty_assessments(status);

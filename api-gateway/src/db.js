@@ -1,9 +1,8 @@
 /**
- * PostgreSQL access for assessments.
+ * PostgreSQL access for teacher accounts, login sessions and assessments.
  *
  * Works with any Postgres URL (Neon, Supabase, AWS RDS, local Docker).
- * If DATABASE_URL is not set the gateway falls back to an in-memory store,
- * which is fine for local development but loses data on every restart.
+ * DATABASE_URL is required: login and submissions are unavailable without it.
  */
 const { Pool } = require('pg');
 
@@ -49,11 +48,47 @@ CREATE TABLE IF NOT EXISTS faculty_assessments (
 );
 CREATE INDEX IF NOT EXISTS idx_faculty_assessments_year ON faculty_assessments(academic_year);
 CREATE INDEX IF NOT EXISTS idx_faculty_assessments_dept ON faculty_assessments(department);
+
+-- Teacher accounts. Everyone who signs up is 'faculty'; promote admins manually:
+--   UPDATE users SET role = 'admin' WHERE email = 'someone@juit.ac.in';
+CREATE TABLE IF NOT EXISTS users (
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    role VARCHAR(50) NOT NULL DEFAULT 'faculty'
+      CHECK (role IN ('student', 'faculty', 'lab_manager', 'admin')),
+    university_id VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE users ALTER COLUMN role SET DEFAULT 'faculty';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email));
+
+-- Login sessions. Only a SHA-256 of each token is stored.
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    user_agent TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
+DELETE FROM user_sessions WHERE expires_at < NOW() - INTERVAL '1 day';
+
+-- One assessment per teacher per academic year; re-submitting updates it.
+-- Rows submitted before accounts existed keep user_id NULL and are unaffected.
+CREATE INDEX IF NOT EXISTS idx_faculty_assessments_user_id ON faculty_assessments(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_faculty_assessments_user_year ON faculty_assessments(user_id, academic_year);
 `;
 
 async function init() {
   if (!process.env.DATABASE_URL) {
-    console.warn('[db] DATABASE_URL not set — using in-memory storage (data is lost on restart).');
+    console.warn('[db] DATABASE_URL not set — login and submissions are disabled until it is configured.');
     return;
   }
   if (pool) {

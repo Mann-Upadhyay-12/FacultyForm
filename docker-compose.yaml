@@ -42,6 +42,8 @@ services:
       # - FACULTY_SERVICE_URL=http://faculty_service:8003
       - AUTH_SERVICE_URL=http://auth_service:8004
       - NOTIFICATION_SERVICE_URL=http://notification_service:8005
+      # Teacher accounts, login sessions and assessments live in Postgres
+      - DATABASE_URL=postgresql://labuser:labpassword@postgres:5432/labdb
     networks:
       - lab_network
     # Temporarily disable strict depends_on

@@ -29,6 +29,7 @@ import {
   Send,
   Upload,
   XCircle,
+  LogOut,
 } from 'lucide-react';
 import '@/App.css';
 
@@ -94,8 +95,22 @@ function isSectionFilled(tabId: string, d: FormData): boolean {
 export default function FormLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { formData, lastSaved, isSaving, submission, apiScores, issues, saveDraftNow, resetForm, exportJSON, importJSON, submitForm, setCertified } =
-    useFormContext();
+  const {
+    formData,
+    lastSaved,
+    isSaving,
+    submission,
+    apiScores,
+    issues,
+    saveDraftNow,
+    resetForm,
+    exportJSON,
+    importJSON,
+    submitForm,
+    setCertified,
+    signOut,
+    userEmail,
+  } = useFormContext();
 
   const [reviewOpen, setReviewOpen] = useState(false);
   const [successOpen, setSuccessOpen] = useState(false);
@@ -136,8 +151,7 @@ export default function FormLayout() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        saveDraftNow();
-        toast({ title: 'Draft saved', description: 'Saved in this browser.' });
+        saveDraftNow().then(() => toast({ title: 'Draft saved', description: 'Saved to your account.' }));
       }
     };
     window.addEventListener('keydown', onKey);
@@ -252,11 +266,10 @@ export default function FormLayout() {
             <button
               type="button"
               onClick={() => {
-                saveDraftNow();
-                toast({ title: 'Draft saved', description: 'Saved in this browser. Use Export to keep a backup file.' });
+                saveDraftNow().then(() => toast({ title: 'Draft saved', description: 'Saved to your account.' }));
               }}
               className="action-btn"
-              title="Save draft in this browser (Ctrl+S)"
+              title="Save draft to your account (Ctrl+S)"
             >
               <Save className="w-4 h-4" />
               <span>Save Draft</span>
@@ -287,6 +300,15 @@ export default function FormLayout() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={resetForm} className="text-rose-600 focus:text-rose-700">
                   <RotateCcw className="w-4 h-4 mr-2" /> Reset form
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {userEmail && (
+                  <div className="px-2 py-1.5 text-xs text-slate-500 truncate" title={userEmail}>
+                    Signed in as {userEmail}
+                  </div>
+                )}
+                <DropdownMenuItem onSelect={() => void signOut()}>
+                  <LogOut className="w-4 h-4 mr-2" /> Log out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

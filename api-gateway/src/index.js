@@ -56,7 +56,9 @@ const apiLimiter = rateLimit({
 // Stricter Rate Limiter for Authentication endpoints
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30, // 30 attempts per 15 minutes
+  max: 30, // 30 failed attempts per 15 minutes
+  // Only failures count, so many teachers behind one campus IP aren't locked out.
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -81,7 +83,7 @@ app.get('/health', (req, res) => {
 const routes = require('./routes');
 
 // Apply routes with rate limiting
-app.use('/api/auth', authLimiter);
+app.use(['/api/auth/login', '/api/auth/register'], authLimiter);
 app.use('/api', apiLimiter, routes);
 
 // 404 handler for undefined API routes

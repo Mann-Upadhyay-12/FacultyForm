@@ -2,6 +2,8 @@ import { createContext, useContext, useState, useEffect, useRef, ReactNode, useC
 import { FormData, initialFormData, normalizeFormData } from '@/types/formTypes';
 import { ApiScores, computeScores } from '@/lib/scoring';
 import { Issue, validateForm } from '@/lib/validation';
+import { useAuth } from '@/hooks/use-auth';
+import { API_URL, apiFetch, ApiError } from '@/lib/api';
 
 /** Keys of FormData whose value is an array of row objects. */
 export type ArrayKey = {
@@ -42,17 +44,32 @@ interface FormContextType {
   addArrayItem: <K extends ArrayKey>(arrayName: K, template: Row<K>) => void;
   removeArrayItem: <K extends ArrayKey>(arrayName: K, index: number, template: Row<K>) => void;
   submitForm: () => Promise<SubmitResult>;
-  saveDraftNow: () => void;
+  /** Saves locally right away and to the signed-in account. */
+  saveDraftNow: () => Promise<void>;
   resetForm: () => void;
   exportJSON: () => void;
   importJSON: (file: File) => Promise<SubmitResult>;
+  /** Saves the draft to the account, clears this browser's copy, then logs out. */
+  signOut: () => Promise<void>;
+  userEmail: string;
 }
 
-const STORAGE_KEY = 'juit_faculty_assessment_draft_v1';
-const TIMESTAMP_KEY = `${STORAGE_KEY}_timestamp`;
-const SUBMITTED_KEY = `${STORAGE_KEY}_submitted`;
+// Drafts written before login existed used these shared keys. Each account now
+// gets its own `${LEGACY_KEY}:${userId}` keys.
+const LEGACY_KEY = 'juit_faculty_assessment_draft_v1';
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') || '';
+function storageKeys(userId: string) {
+  const base = `${LEGACY_KEY}:${userId}`;
+  return { draft: base, timestamp: `${base}_timestamp`, submitted: `${base}_submitted` };
+}
+
+interface ServerAssessment {
+  id: string;
+  status: string;
+  formData: unknown;
+  submittedAt: string | null;
+  updatedAt: string | null;
+}
 
 const FormContext = createContext<FormContextType | undefined>(undefined);
 
@@ -75,8 +92,24 @@ function writeStorage(key: string, value: string | null) {
   }
 }
 
-function readSubmission(): SubmissionInfo | null {
-  const raw = readStorage(SUBMITTED_KEY);
+/** Hands a draft saved before login existed to the first account that signs in on this browser. */
+function migrateLegacyDraft(keys: ReturnType<typeof storageKeys>) {
+  const legacy = readStorage(LEGACY_KEY);
+  if (legacy === null) return;
+  if (readStorage(keys.draft) === null) {
+    writeStorage(keys.draft, legacy);
+    const t = readStorage(`${LEGACY_KEY}_timestamp`);
+    if (t) writeStorage(keys.timestamp, t);
+    const s = readStorage(`${LEGACY_KEY}_submitted`);
+    if (s) writeStorage(keys.submitted, s);
+  }
+  writeStorage(LEGACY_KEY, null);
+  writeStorage(`${LEGACY_KEY}_timestamp`, null);
+  writeStorage(`${LEGACY_KEY}_submitted`, null);
+}
+
+function readSubmission(key: string): SubmissionInfo | null {
+  const raw = readStorage(key);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -89,7 +122,14 @@ function readSubmission(): SubmissionInfo | null {
 }
 
 export function FormProvider({ children }: { children: ReactNode }) {
+  const { user, logout } = useAuth();
+  const keys = useMemo(() => storageKeys(user?.id ?? 'anonymous'), [user?.id]);
+  const STORAGE_KEY = keys.draft;
+  const TIMESTAMP_KEY = keys.timestamp;
+  const SUBMITTED_KEY = keys.submitted;
+
   const [formData, setFormData] = useState<FormData>(() => {
+    migrateLegacyDraft(keys);
     const saved = readStorage(STORAGE_KEY);
     if (!saved) return initialFormData;
     try {
@@ -105,8 +145,11 @@ export function FormProvider({ children }: { children: ReactNode }) {
     return t ? new Date(t) : null;
   });
   const [isSaving, setIsSaving] = useState(false);
-  const [submission, setSubmission] = useState<SubmissionInfo | null>(readSubmission);
+  const [submission, setSubmission] = useState<SubmissionInfo | null>(() => readSubmission(SUBMITTED_KEY));
   const lastWritten = useRef<string>(JSON.stringify(formData));
+  // What the form held when it was loaded, to tell "user typed" from "restored".
+  const loadedJson = useRef<string>(lastWritten.current);
+  const localSavedAt = useRef<number | null>(lastSaved ? lastSaved.getTime() : null);
 
   const persist = useCallback((data: FormData) => {
     const json = JSON.stringify(data);
@@ -139,6 +182,7 @@ export function FormProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
   }, [formData, persist]);
 
+
   // Flush an unsaved edit if the tab is closed during the debounce window.
   // Only when one is pending, so an idle tab never overwrites a newer draft.
   const latest = useRef(formData);
@@ -150,6 +194,34 @@ export function FormProvider({ children }: { children: ReactNode }) {
     window.addEventListener('beforeunload', flush);
     return () => window.removeEventListener('beforeunload', flush);
   }, []);
+
+  // Restore the account's saved assessment from the server (works across devices),
+  // unless this browser holds newer local edits the server hasn't seen.
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ data: ServerAssessment | null }>('/api/assessments/me')
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        if (data.status === 'submitted' && data.submittedAt) {
+          const info: SubmissionInfo = { submittedAt: data.submittedAt, id: data.id, mode: 'server' };
+          writeStorage(SUBMITTED_KEY, JSON.stringify(info));
+          setSubmission(info);
+        }
+        const serverTime = data.updatedAt ? Date.parse(data.updatedAt) : 0;
+        const localIsNewer = localSavedAt.current !== null && localSavedAt.current > serverTime;
+        const userEdited = JSON.stringify(latest.current) !== loadedJson.current;
+        if (localIsNewer || userEdited) return;
+        const restored = normalizeFormData(data.formData);
+        const json = JSON.stringify(restored);
+        lastWritten.current = json;
+        loadedJson.current = json;
+        setFormData(restored);
+      })
+      .catch((err) => console.warn('Could not load saved assessment from server:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [SUBMITTED_KEY]);
 
   // Free hosting tiers put the API to sleep when idle; waking it now means
   // it's ready by the time the teacher submits.
@@ -205,7 +277,40 @@ export function FormProvider({ children }: { children: ReactNode }) {
   const apiScores = useMemo(() => computeScores(formData), [formData]);
   const issues = useMemo(() => validateForm(formData, apiScores), [formData, apiScores]);
 
-  const saveDraftNow = useCallback(() => persist(formData), [formData, persist]);
+  const saveDraftToServer = useCallback(
+    () =>
+      apiFetch('/api/assessments/me', {
+        method: 'PUT',
+        body: JSON.stringify({
+          academicYear: formData.academicYear,
+          formData,
+          apiScores: { total: apiScores.total, claimedTotal: apiScores.claimedTotal },
+        }),
+      }),
+    [formData, apiScores]
+  );
+
+  const saveDraftNow = useCallback(async () => {
+    persist(formData);
+    try {
+      await saveDraftToServer();
+    } catch (err) {
+      console.warn('Draft saved in this browser; saving to your account failed:', err);
+    }
+  }, [formData, persist, saveDraftToServer]);
+
+  const signOut = useCallback(async () => {
+    try {
+      await saveDraftToServer();
+      // Only remove this browser's copy once the account has it.
+      writeStorage(STORAGE_KEY, null);
+      writeStorage(TIMESTAMP_KEY, null);
+      writeStorage(SUBMITTED_KEY, null);
+    } catch (err) {
+      console.warn('Could not sync the draft before logging out; keeping the copy in this browser:', err);
+    }
+    await logout();
+  }, [saveDraftToServer, logout, STORAGE_KEY, TIMESTAMP_KEY, SUBMITTED_KEY]);
 
   const resetForm = useCallback(() => {
     if (!window.confirm('Reset all form fields? This permanently clears the draft saved in this browser.')) return;
@@ -215,7 +320,7 @@ export function FormProvider({ children }: { children: ReactNode }) {
     writeStorage(SUBMITTED_KEY, null);
     setLastSaved(null);
     setSubmission(null);
-  }, []);
+  }, [STORAGE_KEY, TIMESTAMP_KEY, SUBMITTED_KEY]);
 
   const exportJSON = useCallback(() => {
     try {
@@ -267,22 +372,20 @@ export function FormProvider({ children }: { children: ReactNode }) {
       },
     };
 
-    let info: SubmissionInfo = { submittedAt: new Date().toISOString(), mode: 'local' };
-    if (API_URL) {
-      try {
-        const res = await fetch(`${API_URL}/api/assessments`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || body.success === false) {
-          return { ok: false, message: body.error || `Server rejected the submission (HTTP ${res.status}).` };
-        }
-        info = { submittedAt: body.data?.submittedAt || info.submittedAt, id: body.data?.id, mode: 'server' };
-      } catch {
+    // The server links the submission to the signed-in account.
+    let info: SubmissionInfo;
+    try {
+      const body = await apiFetch<{ data?: { id?: string; submittedAt?: string } }>('/api/assessments', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      info = { submittedAt: body.data?.submittedAt || new Date().toISOString(), id: body.data?.id, mode: 'server' };
+    } catch (err) {
+      const e = err as ApiError;
+      if (e.code === 'NETWORK') {
         return { ok: false, message: 'Could not reach the server. Your draft is saved — try again, or print/export a copy.' };
       }
+      return { ok: false, message: e.message || 'Submission failed. Please try again.' };
     }
 
     writeStorage(SUBMITTED_KEY, JSON.stringify(info));
@@ -294,7 +397,7 @@ export function FormProvider({ children }: { children: ReactNode }) {
           ? 'Your assessment has been submitted for HoD verification.'
           : 'Your assessment has been finalised on this device. Print or export it to hand in.',
     };
-  }, [issues, formData, apiScores, submission, persist]);
+  }, [issues, formData, apiScores, submission, persist, SUBMITTED_KEY]);
 
   return (
     <FormContext.Provider
@@ -316,6 +419,8 @@ export function FormProvider({ children }: { children: ReactNode }) {
         resetForm,
         exportJSON,
         importJSON,
+        signOut,
+        userEmail: user?.email ?? '',
       }}
     >
       {children}

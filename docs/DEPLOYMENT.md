@@ -84,4 +84,4 @@ To fetch one full record:
 curl -H "x-admin-key: $ADMIN_API_KEY" "https://<api-url>/api/assessments/<id>"
 ```
 
-Without the key, these routes return 401. Anyone can submit a form, but only the admin key can read them back.
+Without the key, these routes return 401. Teachers must log in to submit, and each one can only read and update their own assessment. Only the admin key, or an account promoted to `admin` via SQL, can read every submission. See [04_authentication.md](04_authentication.md).
