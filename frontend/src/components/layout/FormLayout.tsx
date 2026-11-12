@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Download,
   FileSpreadsheet,
+  LogOut,
   Printer,
   RotateCcw,
   Save,
@@ -55,11 +56,16 @@ export default function FormLayout() {
     saveDraftNow,
     resetForm,
     exportJSON,
-    handleSubmit
+    handleSubmit,
+    signOut,
+    userEmail
   } = useFormContext();
 
   const [reviewOpen, setReviewOpen] = useState(false);
   const [submitSuccessOpen, setSubmitSuccessOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
 
   // Active tab determination
   const currentTabIdx = useMemo(() => {
@@ -124,10 +130,22 @@ export default function FormLayout() {
     }
   };
 
-  const handleFinalSubmit = () => {
-    handleSubmit();
+  const handleFinalSubmit = async () => {
+    setSubmitting(true);
+    setSubmitError(null);
+    const error = await handleSubmit();
+    setSubmitting(false);
+    if (error) {
+      setSubmitError(error);
+      return;
+    }
     setReviewOpen(false);
     setSubmitSuccessOpen(true);
+  };
+
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    await signOut();
   };
 
   const handlePrint = () => {
@@ -195,7 +213,7 @@ export default function FormLayout() {
               type="button"
               onClick={saveDraftNow}
               className="action-btn"
-              title="Save draft to local storage"
+              title="Save draft to your account"
             >
               <Save className="w-4 h-4 mr-1 text-slate-200" />
               <span>Save Draft</span>
@@ -239,6 +257,17 @@ export default function FormLayout() {
             >
               <RotateCcw className="w-4 h-4 mr-1" />
               <span>Reset</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className="action-btn"
+              title={userEmail ? `Signed in as ${userEmail}` : 'Log out'}
+            >
+              <LogOut className="w-4 h-4 mr-1 text-slate-200" />
+              <span>{signingOut ? 'Logging out…' : 'Log Out'}</span>
             </button>
           </div>
         </div>
@@ -359,7 +388,13 @@ export default function FormLayout() {
       </main>
 
       {/* Review & Scorecard Modal */}
-      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
+      <Dialog
+        open={reviewOpen}
+        onOpenChange={(open) => {
+          setReviewOpen(open);
+          if (!open) setSubmitError(null);
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-white border border-slate-200">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold text-[#1e3a5f]">
@@ -459,6 +494,12 @@ export default function FormLayout() {
             <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-xs text-amber-900 leading-relaxed">
               <strong>Certification reminder:</strong> By submitting, you certify that the data entered is accurate and corresponds to your official academic performance during academic year 2023 - 2024.
             </div>
+
+            {submitError && (
+              <div role="alert" className="bg-red-50 border border-red-200 p-3 rounded-lg text-sm text-red-700">
+                {submitError}
+              </div>
+            )}
           </div>
 
           <DialogFooter className="flex flex-col sm:flex-row gap-2 justify-between">
@@ -496,9 +537,10 @@ export default function FormLayout() {
                 size="sm"
                 className="bg-[#1e3a5f] hover:bg-[#2d5a87] text-white"
                 onClick={handleFinalSubmit}
+                disabled={submitting}
               >
                 <Send className="w-4 h-4 mr-1" />
-                Confirm & Submit
+                {submitting ? 'Submitting…' : 'Confirm & Submit'}
               </Button>
             </div>
           </DialogFooter>

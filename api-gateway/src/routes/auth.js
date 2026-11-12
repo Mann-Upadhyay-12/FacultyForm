@@ -1,56 +1,125 @@
 const express = require('express');
-const axios = require('axios');
+const { pool } = require('../db');
+const {
+  hashPassword,
+  verifyPassword,
+  dummyHash,
+  createSession,
+  revokeSession,
+  publicUser,
+  requireAuth,
+  authError
+} = require('../auth');
+
 const router = express.Router();
 
-const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:8004';
-const client = axios.create({
-  baseURL: AUTH_SERVICE_URL,
-  timeout: 8000,
-  headers: { 'Content-Type': 'application/json' }
-});
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD = 8;
+const MAX_PASSWORD = 128;
 
-// Proxy login
-router.post('/login', async (req, res) => {
+function readCredentials(body) {
+  const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
+  const password = typeof body?.password === 'string' ? body.password : '';
+  return { email, password };
+}
+
+/**
+ * POST /api/auth/register
+ * Creates a teacher account (role is always 'faculty') and starts a session.
+ */
+router.post('/register', async (req, res, next) => {
   try {
-    const response = await client.post('/login', req.body);
-    return res.status(response.status).json(response.data);
-  } catch (error) {
-    const status = error.response?.status || (error.code === 'ECONNREFUSED' ? 503 : 500);
-    const message = error.response?.data || {
-      success: false,
-      error: error.code === 'ECONNREFUSED' ? 'Auth service currently unavailable' : (error.message || 'Authentication error')
-    };
-    return res.status(status).json(message);
+    const { email, password } = readCredentials(req.body);
+
+    if (!EMAIL_RE.test(email) || email.length > 255) {
+      return authError(res, 400, 'INVALID_EMAIL', 'Please enter a valid email address.');
+    }
+    if (password.length < MIN_PASSWORD) {
+      return authError(res, 400, 'WEAK_PASSWORD', `Password must be at least ${MIN_PASSWORD} characters.`);
+    }
+    if (password.length > MAX_PASSWORD) {
+      return authError(res, 400, 'WEAK_PASSWORD', `Password must be at most ${MAX_PASSWORD} characters.`);
+    }
+
+    const passwordHash = await hashPassword(password);
+    let user;
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO users (email, password_hash, role, last_login_at)
+         VALUES ($1, $2, 'faculty', NOW())
+         RETURNING user_id, email, first_name, last_name, role`,
+        [email, passwordHash]
+      );
+      user = rows[0];
+    } catch (err) {
+      if (err.code === '23505') {
+        return authError(res, 409, 'EMAIL_TAKEN', 'An account with this email already exists. Please log in instead.');
+      }
+      throw err;
+    }
+
+    const session = await createSession(user.user_id, req.headers['user-agent']);
+    return res.status(201).json({
+      success: true,
+      token: session.token,
+      expiresAt: session.expiresAt,
+      user: publicUser(user)
+    });
+  } catch (err) {
+    return next(err);
   }
 });
 
-// Proxy token refresh
-router.post('/token', async (req, res) => {
+/**
+ * POST /api/auth/login
+ */
+router.post('/login', async (req, res, next) => {
   try {
-    const response = await client.post('/token', req.body);
-    return res.status(response.status).json(response.data);
-  } catch (error) {
-    const status = error.response?.status || (error.code === 'ECONNREFUSED' ? 503 : 500);
-    const message = error.response?.data || {
-      success: false,
-      error: error.code === 'ECONNREFUSED' ? 'Auth service currently unavailable' : (error.message || 'Token refresh error')
-    };
-    return res.status(status).json(message);
+    const { email, password } = readCredentials(req.body);
+    if (!email || !password) {
+      return authError(res, 400, 'MISSING_CREDENTIALS', 'Email and password are required.');
+    }
+
+    const { rows } = await pool.query(
+      `SELECT user_id, email, password_hash, first_name, last_name, role
+         FROM users WHERE LOWER(email) = $1`,
+      [email]
+    );
+    const user = rows[0];
+    const ok = await verifyPassword(password, user ? user.password_hash : await dummyHash());
+    if (!user || !ok) {
+      return authError(res, 401, 'INVALID_CREDENTIALS', 'Incorrect email or password.');
+    }
+
+    await pool.query('UPDATE users SET last_login_at = NOW() WHERE user_id = $1', [user.user_id]);
+    const session = await createSession(user.user_id, req.headers['user-agent']);
+    return res.json({
+      success: true,
+      token: session.token,
+      expiresAt: session.expiresAt,
+      user: publicUser(user)
+    });
+  } catch (err) {
+    return next(err);
   }
 });
 
-// Proxy logout
-router.delete('/logout', async (req, res) => {
+/**
+ * GET /api/auth/me — validates the stored session on app load.
+ */
+router.get('/me', requireAuth, (req, res) => {
+  res.json({ success: true, user: req.user });
+});
+
+/**
+ * POST /api/auth/logout — revokes the current session server-side.
+ */
+router.post('/logout', requireAuth, async (req, res, next) => {
   try {
-    const response = await client.delete('/logout', { data: req.body });
-    return res.status(response.status).json(response.data);
-  } catch (error) {
-    const status = error.response?.status || (error.code === 'ECONNREFUSED' ? 503 : 500);
-    const message = error.response?.data || {
-      success: false,
-      error: error.code === 'ECONNREFUSED' ? 'Auth service currently unavailable' : (error.message || 'Logout error')
-    };
-    return res.status(status).json(message);
+    await revokeSession(req.sessionToken);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
   }
 });
 

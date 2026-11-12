@@ -42,6 +42,13 @@ services:
       # - FACULTY_SERVICE_URL=http://faculty_service:8003
       - AUTH_SERVICE_URL=http://auth_service:8004
       - NOTIFICATION_SERVICE_URL=http://notification_service:8005
+      # Login/signup sessions and assessments are stored in Postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=labuser
+      - DB_PASSWORD=labpassword
+      - DB_NAME=labdb
+      - SESSION_TTL_DAYS=30
     networks:
       - lab_network
     # Temporarily disable strict depends_on

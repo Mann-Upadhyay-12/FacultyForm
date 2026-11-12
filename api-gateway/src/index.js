@@ -5,7 +5,12 @@ const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
+const { ensureSchema } = require('./db');
+
 const app = express();
+
+// Render / Railway / Vercel sit behind a proxy; needed for correct client IPs in rate limiting.
+app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet({
@@ -49,7 +54,9 @@ const apiLimiter = rateLimit({
 // Stricter Rate Limiter for Authentication endpoints
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30, // 30 attempts per 15 minutes
+  max: 30, // 30 failed attempts per 15 minutes
+  // Only failures count, so many teachers behind one campus IP aren't locked out.
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -71,7 +78,7 @@ app.get('/health', (req, res) => {
 const routes = require('./routes');
 
 // Apply routes with rate limiting
-app.use('/api/auth', authLimiter);
+app.use(['/api/auth/login', '/api/auth/register'], authLimiter);
 app.use('/api', apiLimiter, routes);
 
 // 404 handler for undefined API routes
@@ -86,6 +93,11 @@ app.use((req, res) => {
 // Centralized error handler
 app.use((err, req, res, next) => {
   console.error('[API Gateway Error]:', err.stack || err.message);
+  // Database unreachable → tell the client it's temporary rather than a generic 500.
+  const dbDown = ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', '57P01', '3D000', '28P01'].includes(err.code);
+  if (dbDown) {
+    return res.status(503).json({ success: false, error: 'Service temporarily unavailable. Please try again shortly.' });
+  }
   const status = err.status || 500;
   res.status(status).json({
     success: false,
@@ -94,14 +106,20 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-const server = app.listen(PORT, () => {
-  console.log(`🚀 API Gateway running on port ${PORT}`);
-});
+let server;
+ensureSchema()
+  .then(() => console.log('[DB] Schema verified'))
+  .catch((err) => console.error('[DB] Schema setup failed — auth and assessments will be unavailable:', err.message))
+  .finally(() => {
+    server = app.listen(PORT, () => {
+      console.log(`🚀 API Gateway running on port ${PORT}`);
+    });
+  });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM signal received. Closing HTTP server...');
-  server.close(() => {
+  if (server) server.close(() => {
     console.log('HTTP server closed.');
   });
 });
