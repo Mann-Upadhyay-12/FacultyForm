@@ -1,296 +1,131 @@
-
-import { FormField } from '@/components/assesment/FormField';
+import { ApiField, FormField } from '@/components/assesment/FormField';
+import { RepeatableList, SectionTotal } from '@/components/assesment/RepeatableList';
 import { useFormContext } from '@/context/FormContext';
+import { attendanceStats, CAPS, num, suggestClasses } from '@/lib/scoring';
+import { Course, courseLevelOptions, courseTypeOptions, excessClassOptions, templates } from '@/types/formTypes';
+
+function CourseFields({ course, set }: { course: Course; set: (f: keyof Course & string, v: string) => void }) {
+  const over = num(course.scheduled) > 0 && num(course.engaged) > num(course.scheduled);
+  const pct = num(course.scheduled) > 0 ? Math.round((num(course.engaged) / num(course.scheduled)) * 100) : null;
+  return (
+    <>
+      <FormField label="Course code" value={course.courseCode} placeholder="e.g., 18B11CI311 / 18B11HS111" onChange={(v) => set('courseCode', v)} />
+      <FormField label="Course title" value={course.courseTitle} placeholder="e.g., Data Structures / Professional Communication" onChange={(v) => set('courseTitle', v)} />
+      <FormField label="Level" type="select" value={course.level} options={courseLevelOptions} onChange={(v) => set('level', v)} />
+      <FormField label="Component" type="select" value={course.courseType} options={courseTypeOptions} onChange={(v) => set('courseType', v)} />
+      <FormField label="Contact hours / week" type="number" min={0} max={40} value={course.contactHours} placeholder="e.g., 3" onChange={(v) => set('contactHours', v)} />
+      <FormField label="Classes scheduled" type="number" min={0} value={course.scheduled} placeholder="e.g., 42" onChange={(v) => set('scheduled', v)} />
+      <FormField
+        label="Classes engaged"
+        type="number"
+        min={0}
+        value={course.engaged}
+        placeholder="e.g., 41"
+        onChange={(v) => set('engaged', v)}
+        error={over ? 'Cannot be more than classes scheduled.' : undefined}
+        hint={pct !== null ? `${pct}% of scheduled classes engaged` : undefined}
+      />
+    </>
+  );
+}
 
 export default function TeachingPage() {
-  const { formData, isEditing, handleEdit, handleChange, handleArrayChange, addArrayItem, removeArrayItem } = useFormContext();
+  const { formData, handleChange, apiScores } = useFormContext();
+  const stats = attendanceStats([...formData.oddSemester, ...formData.evenSemester]);
 
   return (
     <div>
       <h2 className="page-title">Teaching, Learning and Evaluation Activities</h2>
-      
+      <p className="subtitle">Items 12.1 – 12.2</p>
+
       <div className="info-message">
-        <strong>API Scoring (12.1):</strong> 25 points for 95%+ classes, 15 for 80%+, 0 for below 80%. +5 for excess classes.
+        <strong>API scoring (12.1):</strong> 25 points if 95%+ of scheduled classes were engaged, 15 if 80%+, 0 below 80%.
+        +5 per semester for classes engaged in excess of norms.
       </div>
 
-      {/* ODD SEMESTER */}
-      <div className="semester-section">
-        <h3 className="section-title">ODD SEMESTER (July to December)</h3>
-        
-        {formData.oddSemester.map((course, index) => (
-          <div key={index} className="course-entry">
-            <h4>Course {index + 1}</h4>
-            <div className="course-fields">
-              <FormField
-                label="Course Code"
-                value={course.courseCode}
-                placeholder="e.g., 19BI7CI111"
-                isEditing={isEditing[`odd-code-${index}`]}
-                onEdit={() => handleEdit(`odd-code-${index}`)}
-                onChange={(val) => handleArrayChange('oddSemester', index, 'courseCode', val)}
-              />
-              <FormField
-                label="Course Title"
-                value={course.courseTitle}
-                placeholder="Enter course title"
-                isEditing={isEditing[`odd-title-${index}`]}
-                onEdit={() => handleEdit(`odd-title-${index}`)}
-                onChange={(val) => handleArrayChange('oddSemester', index, 'courseTitle', val)}
-              />
-              <FormField
-                label="Contact Hours/Week"
-                value={course.contactHours}
-                placeholder="Hours"
-                isEditing={isEditing[`odd-hours-${index}`]}
-                onEdit={() => handleEdit(`odd-hours-${index}`)}
-                onChange={(val) => handleArrayChange('oddSemester', index, 'contactHours', val)}
-              />
-              <FormField
-                label="Scheduled Classes"
-                value={course.scheduled}
-                placeholder="Total scheduled"
-                isEditing={isEditing[`odd-scheduled-${index}`]}
-                onEdit={() => handleEdit(`odd-scheduled-${index}`)}
-                onChange={(val) => handleArrayChange('oddSemester', index, 'scheduled', val)}
-              />
-              <FormField
-                label="Engaged Classes"
-                value={course.engaged}
-                placeholder="Total engaged"
-                isEditing={isEditing[`odd-engaged-${index}`]}
-                onEdit={() => handleEdit(`odd-engaged-${index}`)}
-                onChange={(val) => handleArrayChange('oddSemester', index, 'engaged', val)}
-              />
-            </div>
-            {index > 0 && (
-              <button type="button" onClick={() => removeArrayItem('oddSemester', index)} className="remove-button">
-                Remove Course
-              </button>
-            )}
-          </div>
-        ))}
-        
-        <button
-          type="button"
-          onClick={() => addArrayItem('oddSemester', { courseCode: '', courseTitle: '', contactHours: '', scheduled: '', engaged: '' })}
-          className="add-button"
-        >
-          + Add Course
-        </button>
-        
-        <FormField
-          label="Classes Engaged in Excess of Norms (API)"
-          value={formData.oddExcessApi}
-          placeholder="Enter API for excess"
-          isEditing={isEditing.oddExcessApi}
-          onEdit={() => handleEdit('oddExcessApi')}
-          onChange={(val) => handleChange('oddExcessApi', val)}
-        />
-      </div>
-
-      {/* EVEN SEMESTER */}
-      <div className="semester-section">
-        <h3 className="section-title">EVEN SEMESTER (January to June)</h3>
-        
-        {formData.evenSemester.map((course, index) => (
-          <div key={index} className="course-entry">
-            <h4>Course {index + 1}</h4>
-            <div className="course-fields">
-              <FormField
-                label="Course Code"
-                value={course.courseCode}
-                placeholder="e.g., L18B1WCI732"
-                isEditing={isEditing[`even-code-${index}`]}
-                onEdit={() => handleEdit(`even-code-${index}`)}
-                onChange={(val) => handleArrayChange('evenSemester', index, 'courseCode', val)}
-              />
-              <FormField
-                label="Course Title"
-                value={course.courseTitle}
-                placeholder="Enter course title"
-                isEditing={isEditing[`even-title-${index}`]}
-                onEdit={() => handleEdit(`even-title-${index}`)}
-                onChange={(val) => handleArrayChange('evenSemester', index, 'courseTitle', val)}
-              />
-              <FormField
-                label="Contact Hours/Week"
-                value={course.contactHours}
-                placeholder="Hours"
-                isEditing={isEditing[`even-hours-${index}`]}
-                onEdit={() => handleEdit(`even-hours-${index}`)}
-                onChange={(val) => handleArrayChange('evenSemester', index, 'contactHours', val)}
-              />
-              <FormField
-                label="Scheduled Classes"
-                value={course.scheduled}
-                placeholder="Total scheduled"
-                isEditing={isEditing[`even-scheduled-${index}`]}
-                onEdit={() => handleEdit(`even-scheduled-${index}`)}
-                onChange={(val) => handleArrayChange('evenSemester', index, 'scheduled', val)}
-              />
-              <FormField
-                label="Engaged Classes"
-                value={course.engaged}
-                placeholder="Total engaged"
-                isEditing={isEditing[`even-engaged-${index}`]}
-                onEdit={() => handleEdit(`even-engaged-${index}`)}
-                onChange={(val) => handleArrayChange('evenSemester', index, 'engaged', val)}
-              />
-            </div>
-            {index > 0 && (
-              <button type="button" onClick={() => removeArrayItem('evenSemester', index)} className="remove-button">
-                Remove Course
-              </button>
-            )}
-          </div>
-        ))}
-        
-        <button
-          type="button"
-          onClick={() => addArrayItem('evenSemester', { courseCode: '', courseTitle: '', contactHours: '', scheduled: '', engaged: '' })}
-          className="add-button"
-        >
-          + Add Course
-        </button>
-        
-        <FormField
-          label="Classes Engaged in Excess of Norms (API)"
-          value={formData.evenExcessApi}
-          placeholder="Enter API for excess"
-          isEditing={isEditing.evenExcessApi}
-          onEdit={() => handleEdit('evenExcessApi')}
-          onChange={(val) => handleChange('evenExcessApi', val)}
-        />
-      </div>
-
-      {/* Resources Section */}
-      <h3 className="section-title">Reading/Instructional Material (12.2)</h3>
-      <div className="info-message">
-        Maximum API: 35 points. Score 10 for each sub-component.
-      </div>
-      
-      {formData.resources.map((res, index) => (
-        <div key={index} className="course-entry">
-          <h4>Resource {index + 1}</h4>
+      <section className="semester-section">
+        <h3 className="section-title">Odd semester (July – December)</h3>
+        <RepeatableList name="oddSemester" template={templates.course} itemLabel="Course" addLabel="Add odd-semester course">
+          {(c, _i, set) => <CourseFields course={c} set={set} />}
+        </RepeatableList>
+        <div className="field-grid">
           <FormField
-            label="Course Code"
-            value={res.courseCode}
-            placeholder="Enter course code"
-            isEditing={isEditing[`res-code-${index}`]}
-            onEdit={() => handleEdit(`res-code-${index}`)}
-            onChange={(val) => handleArrayChange('resources', index, 'courseCode', val)}
+            label="Classes engaged in excess of norms (odd semester)"
+            type="select"
+            value={formData.oddExcessApi}
+            options={excessClassOptions}
+            onChange={(v) => handleChange('oddExcessApi', v)}
           />
-          <FormField
-            label="Knowledge Resources Consulted"
-            value={res.consulted}
-            placeholder="Enter consulted resources"
-            multiline
-            isEditing={isEditing[`res-consulted-${index}`]}
-            onEdit={() => handleEdit(`res-consulted-${index}`)}
-            onChange={(val) => handleArrayChange('resources', index, 'consulted', val)}
-          />
-          <FormField
-            label="Prescribed Resources"
-            value={res.prescribed}
-            placeholder="Enter prescribed resources"
-            multiline
-            isEditing={isEditing[`res-prescribed-${index}`]}
-            onEdit={() => handleEdit(`res-prescribed-${index}`)}
-            onChange={(val) => handleArrayChange('resources', index, 'prescribed', val)}
-          />
-          <FormField
-            label="Additional Resources Provided"
-            value={res.additional}
-            placeholder="Enter additional resources (PPTs, notes, etc.)"
-            multiline
-            isEditing={isEditing[`res-additional-${index}`]}
-            onEdit={() => handleEdit(`res-additional-${index}`)}
-            onChange={(val) => handleArrayChange('resources', index, 'additional', val)}
-          />
-          {index > 0 && (
-            <button type="button" onClick={() => removeArrayItem('resources', index)} className="remove-button">
-              Remove Resource
-            </button>
-          )}
         </div>
-      ))}
-      
-      <button
-        type="button"
-        onClick={() => addArrayItem('resources', { courseCode: '', consulted: '', prescribed: '', additional: '' })}
-        className="add-button"
-      >
-        + Add Resource
-      </button>
+      </section>
 
-      <FormField
-        label="Participatory/Innovative Teaching Learning Methodologies"
-        value={formData.participatory}
-        placeholder="Give brief details"
-        multiline
-        isEditing={isEditing.participatory}
-        onEdit={() => handleEdit('participatory')}
-        onChange={(val) => handleChange('participatory', val)}
-      />
-      
-      <FormField
-        label="Any Modification/Addition to Syllabus"
-        value={formData.modification}
-        placeholder="Give brief details"
-        multiline
-        isEditing={isEditing.modification}
-        onEdit={() => handleEdit('modification')}
-        onChange={(val) => handleChange('modification', val)}
-      />
-      
-      <FormField
-        label="Any Coverage/Introduction Beyond Syllabus"
-        value={formData.coverageBeyond}
-        placeholder="Give brief details"
-        multiline
-        isEditing={isEditing.coverageBeyond}
-        onEdit={() => handleEdit('coverageBeyond')}
-        onChange={(val) => handleChange('coverageBeyond', val)}
-      />
-      
-      <FormField
-        label="Self-Assessed API Score for 12.2"
-        value={formData.teachingApi}
-        placeholder="Enter API score (max 35)"
-        isEditing={isEditing.teachingApi}
-        onEdit={() => handleEdit('teachingApi')}
-        onChange={(val) => handleChange('teachingApi', val)}
-      />
+      <section className="semester-section">
+        <h3 className="section-title">Even semester (January – June)</h3>
+        <RepeatableList name="evenSemester" template={templates.course} itemLabel="Course" addLabel="Add even-semester course">
+          {(c, _i, set) => <CourseFields course={c} set={set} />}
+        </RepeatableList>
+        <div className="field-grid">
+          <FormField
+            label="Classes engaged in excess of norms (even semester)"
+            type="select"
+            value={formData.evenExcessApi}
+            options={excessClassOptions}
+            onChange={(v) => handleChange('evenExcessApi', v)}
+          />
+        </div>
+      </section>
 
-      {/* Project Guidance */}
-      <h3 className="section-title">Project Guidance at UG Level (12.3)</h3>
-      
-      <FormField
-        label="Number of Projects Guided"
-        value={formData.projectsGuided}
-        placeholder="Enter number"
-        isEditing={isEditing.projectsGuided}
-        onEdit={() => handleEdit('projectsGuided')}
-        onChange={(val) => handleChange('projectsGuided', val)}
-      />
-      
-      <FormField
-        label="Number of Students Guided"
-        value={formData.studentsGuided}
-        placeholder="Enter number"
-        isEditing={isEditing.studentsGuided}
-        onEdit={() => handleEdit('studentsGuided')}
-        onChange={(val) => handleChange('studentsGuided', val)}
-      />
-      
-      <FormField
-        label="Self-Assessed API Score for 12.3"
-        value={formData.projectGuidanceApi}
-        placeholder="Enter API score (max 10)"
-        isEditing={isEditing.projectGuidanceApi}
-        onEdit={() => handleEdit('projectGuidanceApi')}
-        onChange={(val) => handleChange('projectGuidanceApi', val)}
-      />
+      <div className="calc-box">
+        <div>
+          <span className="calc-label">Classes engaged / scheduled (both semesters)</span>
+          <strong>
+            {stats.engaged} / {stats.scheduled}
+            {stats.percent !== null && ` · ${stats.percent.toFixed(1)}%`}
+          </strong>
+        </div>
+        <ApiField
+          label="Self-assessed API for classes engaged (12.1)"
+          value={formData.classesApi}
+          onChange={(v) => handleChange('classesApi', v)}
+          suggested={suggestClasses(formData)}
+          max={CAPS.classes}
+        />
+      </div>
+
+      <h3 className="section-title">Reading / instructional material (12.2)</h3>
+      <div className="info-message">Maximum API: 35 points. Score up to 10 for each sub-component below.</div>
+
+      <RepeatableList name="resources" template={templates.resources} itemLabel="Course material">
+        {(r, _i, set) => (
+          <>
+            <FormField
+              label="Course code"
+              value={r.courseCode}
+              placeholder="Select or type a course code"
+              suggestions={[...formData.oddSemester, ...formData.evenSemester].map((c) => c.courseCode).filter(Boolean)}
+              onChange={(v) => set('courseCode', v)}
+            />
+            <FormField label="Knowledge resources consulted" type="textarea" value={r.consulted} placeholder="Books, journals, archives, online sources…" onChange={(v) => set('consulted', v)} />
+            <FormField label="Prescribed resources" type="textarea" value={r.prescribed} placeholder="Textbooks / readers prescribed to students" onChange={(v) => set('prescribed', v)} />
+            <FormField label="Additional resources provided" type="textarea" value={r.additional} placeholder="PPTs, notes, case studies, reading packs, videos…" onChange={(v) => set('additional', v)} />
+          </>
+        )}
+      </RepeatableList>
+
+      <div className="field-grid">
+        <FormField
+          label="Participatory / innovative teaching-learning methods"
+          type="textarea"
+          value={formData.participatory}
+          placeholder="e.g., flipped classroom, case method, role play, field visits, peer review"
+          onChange={(v) => handleChange('participatory', v)}
+        />
+        <FormField label="Any modification / addition to syllabus" type="textarea" value={formData.modification} placeholder="Give brief details" onChange={(v) => handleChange('modification', v)} />
+        <FormField label="Any coverage / introduction beyond syllabus" type="textarea" value={formData.coverageBeyond} placeholder="Give brief details" onChange={(v) => handleChange('coverageBeyond', v)} />
+        <ApiField label="Self-assessed API for 12.2" value={formData.teachingApi} onChange={(v) => handleChange('teachingApi', v)} max={CAPS.teachingResources} />
+      </div>
+
+      <SectionTotal label="Items 12.1 – 12.2 total" claimed={apiScores.byKey.classes.claimed + apiScores.byKey.resources.claimed} counted={apiScores.byKey.classes.counted + apiScores.byKey.resources.counted} />
     </div>
   );
 }

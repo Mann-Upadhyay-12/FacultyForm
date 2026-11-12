@@ -1,26 +1,34 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useFormContext } from '@/context/FormContext';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter
-} from '@/components/ui/dialog';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/hooks/use-toast';
+import { PrintReport } from '@/components/assesment/PrintReport';
+import { TAB_SCORE_KEYS } from '@/lib/scoring';
+import { departmentOptions, designationOptions, FormData, labelFor } from '@/types/formTypes';
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Download,
   FileSpreadsheet,
+  Loader2,
+  MoreHorizontal,
   Printer,
   RotateCcw,
   Save,
   Send,
-  Sparkles
+  Upload,
+  XCircle,
 } from 'lucide-react';
 import '@/App.css';
 
@@ -33,110 +41,157 @@ interface TabConfig {
 }
 
 const tabs: TabConfig[] = [
-  { id: 'personal', path: '/form/personal', label: 'Personal Info', icon: '👤', section: 'Items 1-10' },
-  { id: 'programs', path: '/form/programs', label: 'Programs Attended', icon: '📚', section: 'Item 11' },
-  { id: 'teaching', path: '/form/teaching', label: 'Teaching Activities', icon: '📖', section: 'Item 12.1-2' },
-  { id: 'examination', path: '/form/examination', label: 'Examination Duties', icon: '📝', section: 'Item 12.3-4' },
+  { id: 'personal', path: '/form/personal', label: 'Personal Info', icon: '👤', section: 'Items 1–10' },
+  { id: 'programs', path: '/form/programs', label: 'Programmes Attended', icon: '📚', section: 'Item 11' },
+  { id: 'teaching', path: '/form/teaching', label: 'Teaching Activities', icon: '📖', section: 'Items 12.1–12.2' },
+  { id: 'examination', path: '/form/examination', label: 'Guidance & Exams', icon: '📝', section: 'Items 12.3–12.4' },
   { id: 'activities', path: '/form/activities', label: 'Co-Curricular', icon: '🎯', section: 'Item 13' },
-  { id: 'research', path: '/form/research', label: 'Research & Pubs', icon: '🔬', section: 'Items 14-15' },
+  { id: 'research', path: '/form/research', label: 'Papers & Books', icon: '🔬', section: 'Items 14–15' },
   { id: 'projects', path: '/form/projects', label: 'Projects & Consultancy', icon: '💼', section: 'Item 16' },
   { id: 'guidance', path: '/form/guidance', label: 'Research Guidance', icon: '🎓', section: 'Item 17' },
-  { id: 'other', path: '/form/other', label: 'Other Information', icon: 'ℹ️', section: 'Items 18-19' }
+  { id: 'other', path: '/form/other', label: 'Other Information', icon: 'ℹ️', section: 'Items 18–19' },
 ];
+
+const any = <T,>(rows: T[], pick: (r: T) => unknown) => rows.some((r) => Boolean(pick(r)));
+
+function isSectionFilled(tabId: string, d: FormData): boolean {
+  switch (tabId) {
+    case 'personal':
+      return Boolean(d.name.trim() && d.department && d.designation);
+    case 'programs':
+      return any(d.programs, (p) => p.title);
+    case 'teaching':
+      return any([...d.oddSemester, ...d.evenSemester], (c) => c.courseCode || c.courseTitle);
+    case 'examination':
+      return Boolean(
+        d.examinationApi ||
+          d.projectGuidanceApi ||
+          d.projectsGuided ||
+          d.abEvaluated.ug ||
+          d.abEvaluated.pg ||
+          Object.values(d.questionPapersSet.ug).some(Boolean) ||
+          Object.values(d.questionPapersSet.pg).some(Boolean)
+      );
+    case 'activities':
+      return (
+        any([...d.studentActivities, ...d.departmentActivities, ...d.instituteActivities], (a) => a.activity) ||
+        any(d.lectures, (l) => l.title) ||
+        any(d.articles, (a) => a.title)
+      );
+    case 'research':
+      return any(d.publications, (p) => p.title) || any(d.books, (b) => b.title);
+    case 'projects':
+      return any(d.researchProjects, (p) => p.title);
+    case 'guidance':
+      return any(d.guidance, (g) => g.enrolName);
+    case 'other':
+      return any(d.membership, (m) => m.body) || any(d.achievements, (a) => a.description) || Boolean(d.otherInfo);
+    default:
+      return false;
+  }
+}
 
 export default function FormLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const {
-    formData,
-    lastSaved,
-    isSaving,
-    apiScores,
-    saveDraftNow,
-    resetForm,
-    exportJSON,
-    handleSubmit
-  } = useFormContext();
+  const { formData, lastSaved, isSaving, submission, apiScores, issues, saveDraftNow, resetForm, exportJSON, importJSON, submitForm, setCertified } =
+    useFormContext();
 
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [submitSuccessOpen, setSubmitSuccessOpen] = useState(false);
+  const [successOpen, setSuccessOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState('');
+  const fileInput = useRef<HTMLInputElement>(null);
 
-  // Active tab determination
-  const currentTabIdx = useMemo(() => {
-    const idx = tabs.findIndex(
-      (t) => location.pathname === t.path || (location.pathname === '/form' && t.id === 'personal')
-    );
-    return idx >= 0 ? idx : 0;
-  }, [location.pathname]);
-
+  const currentTabIdx = Math.max(0, tabs.findIndex((t) => location.pathname.startsWith(t.path)));
   const currentTab = tabs[currentTabIdx];
-  const progressPercent = Math.round(((currentTabIdx + 1) / tabs.length) * 100);
 
-  // User initials calculation
+  const filled = useMemo(() => tabs.map((t) => isSectionFilled(t.id, formData)), [formData]);
+  const filledCount = filled.filter(Boolean).length;
+  const progressPercent = Math.round((filledCount / tabs.length) * 100);
+
+  const errors = issues.filter((i) => i.level === 'error');
+  const warnings = issues.filter((i) => i.level === 'warning');
+
   const initials = useMemo(() => {
-    if (!formData.name.trim()) return 'FA';
-    const parts = formData.name.trim().split(/\s+/);
+    const parts = formData.name
+      .replace(/^(dr|prof|mr|mrs|ms)\.?\s+/i, '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    if (!parts.length) return 'FA';
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }, [formData.name]);
 
-  // Section completion check for sidebar indicators
-  const isSectionFilled = (tabId: string): boolean => {
-    switch (tabId) {
-      case 'personal':
-        return Boolean(formData.name && formData.department && formData.designation);
-      case 'programs':
-        return formData.programs.some((p) => Boolean(p.title));
-      case 'teaching':
-        return formData.oddSemester.some((c) => Boolean(c.courseCode)) || formData.evenSemester.some((c) => Boolean(c.courseCode));
-      case 'examination':
-        return Boolean(formData.examinationApi || formData.abEvaluated.ug || formData.questionPapersSet.ug.t1);
-      case 'activities':
-        return (
-          formData.studentActivities.some((a) => Boolean(a.activity)) ||
-          formData.departmentActivities.some((a) => Boolean(a.activity)) ||
-          formData.instituteActivities.some((a) => Boolean(a.activity))
-        );
-      case 'research':
-        return formData.publications.some((p) => Boolean(p.title)) || formData.books.some((b) => Boolean(b.title));
-      case 'projects':
-        return formData.researchProjects.some((p) => Boolean(p.title));
-      case 'guidance':
-        return formData.guidance.some((g) => Boolean(g.enrolName));
-      case 'other':
-        return formData.membership.some((m) => Boolean(m.body)) || Boolean(formData.otherInfo);
-      default:
-        return false;
-    }
+  const ayLabel = formData.academicYear.replace('-', ' – ');
+
+  useEffect(() => {
+    document.title = `${currentTab.label} · Faculty Self Assessment ${formData.academicYear}`;
+  }, [currentTab.label, formData.academicYear]);
+
+  // Ctrl/Cmd+S saves the draft instead of the browser "save page" dialog.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveDraftNow();
+        toast({ title: 'Draft saved', description: 'Saved in this browser.' });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [saveDraftNow]);
+
+  const goTo = (idx: number) => {
+    if (idx < 0 || idx >= tabs.length) return;
+    navigate(tabs[idx].path);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const goToNextTab = () => {
-    if (currentTabIdx < tabs.length - 1) {
-      navigate(tabs[currentTabIdx + 1].path);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+  const openReview = () => {
+    setSubmitError(null);
+    setReviewOpen(true);
   };
 
-  const goToPrevTab = () => {
-    if (currentTabIdx > 0) {
-      navigate(tabs[currentTabIdx - 1].path);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+  const handleFinalSubmit = async () => {
+    setSubmitting(true);
+    setSubmitError(null);
+    const result = await submitForm();
+    setSubmitting(false);
+    if (!result.ok) {
+      setSubmitError(result.message);
+      return;
     }
-  };
-
-  const handleFinalSubmit = () => {
-    handleSubmit();
+    setSuccessMessage(result.message);
     setReviewOpen(false);
-    setSubmitSuccessOpen(true);
+    setSuccessOpen(true);
+  };
+
+  const handleImport = async (file?: File) => {
+    if (!file) return;
+    if (!window.confirm('Replace everything currently in the form with the contents of this backup file?')) return;
+    const result = await importJSON(file);
+    toast({ title: result.ok ? 'Backup restored' : 'Import failed', description: result.message, variant: result.ok ? 'default' : 'destructive' });
   };
 
   const handlePrint = () => {
-    window.print();
+    setReviewOpen(false);
+    setSuccessOpen(false);
+    // Let the dialogs unmount so they don't end up in the printout.
+    setTimeout(() => window.print(), 150);
   };
+
+  const tabIssues = (tabId: string) => issues.filter((i) => i.tab === tabId);
+  const tabPoints = (tabId: string) => TAB_SCORE_KEYS[tabId].reduce((a, k) => a + apiScores.byKey[k].counted, 0);
 
   return (
     <div className="app-container">
-      {/* Top Header */}
+      <a href="#form-content" className="skip-link">
+        Skip to form
+      </a>
+
       <header className="header" role="banner">
         <div className="header-content">
           <div className="profile-header">
@@ -146,106 +201,110 @@ export default function FormLayout() {
             <div className="profile-info">
               <h1>{formData.name || 'Faculty Member'}</h1>
               <p>
-                {formData.department ? `${formData.department} Department` : 'Department'}
+                {formData.department ? labelFor(departmentOptions, formData.department) : 'Department not selected'}
                 {' • '}
-                {formData.designation || 'Designation'}
+                {formData.designation ? labelFor(designationOptions, formData.designation) : 'Designation not selected'}
               </p>
             </div>
           </div>
 
           <div className="university-info">
             <h2>JAYPEE UNIVERSITY OF INFORMATION TECHNOLOGY</h2>
-            <h3>Annual Self Assessment - Faculty (PBAS)</h3>
+            <h3>Annual Self Assessment – Faculty (PBAS)</h3>
             <div className="header-meta">
-              <span>Academic Year: <strong>2023 - 2024</strong></span>
-              <span className="draft-pill">
+              <span>
+                Academic Year: <strong>{ayLabel}</strong>
+              </span>
+              <span className="draft-pill" aria-live="polite">
                 {isSaving ? (
                   <span className="flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    Saving...
+                    Saving…
                   </span>
                 ) : lastSaved ? (
                   <span className="flex items-center gap-1" title={lastSaved.toLocaleString()}>
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                    Draft saved
+                    Draft saved {lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 ) : (
-                  <span>Ready</span>
+                  <span>Not saved yet</span>
                 )}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Action Bar inside Header */}
         <div className="header-actions-bar">
           <div className="header-stats">
             <div className="stat-pill">
-              <span className="stat-label">Total API Score:</span>
-              <span className="stat-value">{apiScores.total.toFixed(1)}</span>
+              <span className="stat-label">Total API score</span>
+              <span className="stat-value">{apiScores.total}</span>
             </div>
             <div className="stat-pill">
-              <span className="stat-label">Active Step:</span>
-              <span className="stat-value">{currentTabIdx + 1} of {tabs.length}</span>
+              <span className="stat-label">Sections filled</span>
+              <span className="stat-value">
+                {filledCount} / {tabs.length}
+              </span>
             </div>
           </div>
 
           <div className="header-buttons">
             <button
               type="button"
-              onClick={saveDraftNow}
+              onClick={() => {
+                saveDraftNow();
+                toast({ title: 'Draft saved', description: 'Saved in this browser. Use Export to keep a backup file.' });
+              }}
               className="action-btn"
-              title="Save draft to local storage"
+              title="Save draft in this browser (Ctrl+S)"
             >
-              <Save className="w-4 h-4 mr-1 text-slate-200" />
+              <Save className="w-4 h-4" />
               <span>Save Draft</span>
             </button>
-
-            <button
-              type="button"
-              onClick={() => setReviewOpen(true)}
-              className="action-btn highlight"
-              title="Open Assessment Scorecard Summary"
-            >
-              <FileSpreadsheet className="w-4 h-4 mr-1 text-cyan-300" />
-              <span>Review Summary</span>
+            <button type="button" onClick={openReview} className="action-btn highlight">
+              <FileSpreadsheet className="w-4 h-4 text-cyan-300" />
+              <span>Review & Submit</span>
+            </button>
+            <button type="button" onClick={handlePrint} className="action-btn" title="Print the complete form, or save it as PDF">
+              <Printer className="w-4 h-4" />
+              <span>Print / PDF</span>
             </button>
 
-            <button
-              type="button"
-              onClick={exportJSON}
-              className="action-btn"
-              title="Download backup JSON copy"
-            >
-              <Download className="w-4 h-4 mr-1 text-slate-200" />
-              <span>Export JSON</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handlePrint}
-              className="action-btn"
-              title="Print or Save as PDF"
-            >
-              <Printer className="w-4 h-4 mr-1 text-slate-200" />
-              <span>Print Form</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={resetForm}
-              className="action-btn text-rose-200 hover:text-white"
-              title="Reset Form to blank"
-            >
-              <RotateCcw className="w-4 h-4 mr-1" />
-              <span>Reset</span>
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="action-btn" aria-label="More actions">
+                  <MoreHorizontal className="w-4 h-4" />
+                  <span>More</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 bg-white">
+                <DropdownMenuItem onSelect={exportJSON}>
+                  <Download className="w-4 h-4 mr-2" /> Export backup (.json)
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => fileInput.current?.click()}>
+                  <Upload className="w-4 h-4 mr-2" /> Import backup…
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={resetForm} className="text-rose-600 focus:text-rose-700">
+                  <RotateCcw className="w-4 h-4 mr-2" /> Reset form
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <input
+              ref={fileInput}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                handleImport(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
           </div>
         </div>
       </header>
 
-      {/* Progress Strip */}
-      <div className="progress-strip" aria-label="Assessment Form Progress">
+      <div className="progress-strip" aria-label="Assessment form progress">
         <div className="progress-track">
           <div
             className="progress-fill"
@@ -254,46 +313,60 @@ export default function FormLayout() {
             aria-valuenow={progressPercent}
             aria-valuemin={0}
             aria-valuemax={100}
+            aria-label="Sections filled"
           />
         </div>
         <div className="progress-info">
-          <span>Section {currentTabIdx + 1} of {tabs.length}: <strong>{currentTab.label}</strong></span>
-          <span>{progressPercent}% completed</span>
+          <span>
+            Section {currentTabIdx + 1} of {tabs.length}: <strong>{currentTab.label}</strong>
+          </span>
+          <span>
+            {filledCount} of {tabs.length} sections have entries
+          </span>
         </div>
       </div>
 
-      {/* Main Content Area */}
+      {submission && (
+        <div className="submitted-banner" role="status">
+          <CheckCircle2 className="w-4 h-4" />
+          <span>
+            {submission.mode === 'server' ? 'Submitted' : 'Finalised on this device'} on {new Date(submission.submittedAt).toLocaleString()}.
+            Any changes you make now need to be submitted again.
+          </span>
+        </div>
+      )}
+
       <main className="main-wrapper">
         <div className="main-content">
-          {/* Navigation Sidebar / Mobile Scrollable Bar */}
-          <nav className="sidebar" aria-label="Form Sections Navigation">
+          <nav className="sidebar" aria-label="Form sections">
             <div className="sidebar-container">
               <div className="sidebar-header">
                 <h4>Assessment Sections</h4>
-                <span className="sidebar-badge">{tabs.length} Tabs</span>
+                <span className="sidebar-badge">{tabs.length} sections</span>
               </div>
               <ul className="sidebar-tabs-list">
-                {tabs.map((tab) => {
-                  const isActive = location.pathname === tab.path || (location.pathname === '/form' && tab.id === 'personal');
-                  const filled = isSectionFilled(tab.id);
-
+                {tabs.map((tab, idx) => {
+                  const isActive = idx === currentTabIdx;
+                  const ti = tabIssues(tab.id);
+                  const hasError = ti.some((i) => i.level === 'error');
+                  const pts = tabPoints(tab.id);
                   return (
                     <li key={tab.id}>
-                      <Link
-                        to={tab.path}
-                        className={isActive ? 'tab-button active' : 'tab-button'}
-                        aria-current={isActive ? 'page' : undefined}
-                      >
-                        <span className="tab-icon" aria-hidden="true">{tab.icon}</span>
+                      <Link to={tab.path} className={isActive ? 'tab-button active' : 'tab-button'} aria-current={isActive ? 'page' : undefined}>
+                        <span className="tab-icon" aria-hidden="true">
+                          {tab.icon}
+                        </span>
                         <div className="tab-details">
                           <span className="tab-title">{tab.label}</span>
-                          <span className="tab-subtext">{tab.section}</span>
+                          <span className="tab-subtext">
+                            {tab.section}
+                            {pts > 0 && ` · ${pts} pts`}
+                          </span>
                         </div>
-                        {filled && (
-                          <CheckCircle2
-                            className="tab-check-icon"
-                            aria-label="Section contains data"
-                          />
+                        {hasError ? (
+                          <AlertTriangle className="tab-check-icon tab-warn-icon" aria-label="Section has errors" />
+                        ) : (
+                          filled[idx] && <CheckCircle2 className="tab-check-icon" aria-label="Section has entries" />
                         )}
                       </Link>
                     </li>
@@ -303,52 +376,36 @@ export default function FormLayout() {
             </div>
           </nav>
 
-          {/* Form Content Area */}
           <section className="content-area">
-            <div className="content-card">
+            <div className="content-card" id="form-content">
               <Outlet />
             </div>
 
-            {/* Step Navigation Bar */}
             <div className="step-navigation-bar">
               <button
                 type="button"
-                onClick={goToPrevTab}
+                onClick={() => goTo(currentTabIdx - 1)}
                 disabled={currentTabIdx === 0}
                 className={`nav-step-btn prev ${currentTabIdx === 0 ? 'disabled' : ''}`}
-                aria-label="Previous Section"
               >
                 <ChevronLeft className="w-4 h-4 mr-1" />
-                <span>Previous Section</span>
+                <span>Previous</span>
               </button>
 
               <div className="step-actions-center">
-                <button
-                  type="button"
-                  onClick={() => setReviewOpen(true)}
-                  className="quick-review-btn"
-                >
-                  <Sparkles className="w-4 h-4 mr-1 text-blue-600" />
-                  Scorecard ({apiScores.total.toFixed(1)} pts)
+                <button type="button" onClick={openReview} className="quick-review-btn">
+                  <FileSpreadsheet className="w-4 h-4 mr-1 text-blue-600" />
+                  Scorecard ({apiScores.total} pts)
                 </button>
               </div>
 
               {currentTabIdx < tabs.length - 1 ? (
-                <button
-                  type="button"
-                  onClick={goToNextTab}
-                  className="nav-step-btn next"
-                  aria-label={`Next section: ${tabs[currentTabIdx + 1].label}`}
-                >
+                <button type="button" onClick={() => goTo(currentTabIdx + 1)} className="nav-step-btn next">
                   <span>Next: {tabs[currentTabIdx + 1].label}</span>
                   <ChevronRight className="w-4 h-4 ml-1" />
                 </button>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => setReviewOpen(true)}
-                  className="nav-step-btn submit"
-                >
+                <button type="button" onClick={openReview} className="nav-step-btn submit">
                   <Send className="w-4 h-4 mr-1" />
                   <span>Review & Submit</span>
                 </button>
@@ -358,189 +415,180 @@ export default function FormLayout() {
         </div>
       </main>
 
-      {/* Review & Scorecard Modal */}
-      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-white border border-slate-200">
+      <PrintReport />
+
+      {/* Review & scorecard */}
+      <Dialog open={reviewOpen} onOpenChange={(o) => !submitting && setReviewOpen(o)}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto bg-white border border-slate-200">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-[#1e3a5f]">
-              Faculty Self-Assessment Scorecard Summary
-            </DialogTitle>
+            <DialogTitle className="text-xl font-bold text-[#1e3a5f]">Self-Assessment Scorecard · {ayLabel}</DialogTitle>
             <DialogDescription className="text-sm text-slate-500">
-              Review your self-assessed API scores before final submission.
+              Check your API points and fix any problems before final submission.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="py-3 space-y-4">
-            {/* Faculty Snapshot */}
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                <div>
-                  <span className="text-slate-500 block">Faculty Name:</span>
-                  <span className="font-semibold text-slate-800">{formData.name || 'Not filled'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block">Department:</span>
-                  <span className="font-semibold text-slate-800">{formData.department || 'Not selected'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block">Designation:</span>
-                  <span className="font-semibold text-slate-800">{formData.designation || 'Not selected'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block">Pay Scale / Pay:</span>
-                  <span className="font-semibold text-slate-800">{formData.payScale || 'Not filled'}</span>
-                </div>
+          <div className="py-2 space-y-4">
+            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <div>
+                <span className="text-slate-500 block">Faculty name</span>
+                <span className="font-semibold text-slate-800">{formData.name || 'Not filled'}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block">Department</span>
+                <span className="font-semibold text-slate-800">{formData.department ? labelFor(departmentOptions, formData.department) : 'Not selected'}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block">Designation</span>
+                <span className="font-semibold text-slate-800">{formData.designation ? labelFor(designationOptions, formData.designation) : 'Not selected'}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block">Pay scale / pay</span>
+                <span className="font-semibold text-slate-800">{formData.payScale || 'Not filled'}</span>
               </div>
             </div>
 
-            {/* Scorecard Table */}
-            <div>
-              <h4 className="font-semibold text-slate-700 text-sm mb-2">Category-Wise API Points</h4>
-              <div className="border border-slate-200 rounded-lg overflow-hidden">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-slate-100 text-slate-700 text-xs uppercase font-semibold">
-                    <tr>
-                      <th className="py-2.5 px-3">Section</th>
-                      <th className="py-2.5 px-3">Description</th>
-                      <th className="py-2.5 px-3 text-right">Self API</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    <tr>
-                      <td className="py-2 px-3 font-medium text-slate-800">11</td>
-                      <td className="py-2 px-3 text-slate-600">Orientation, Refresher, FDPs & Courses</td>
-                      <td className="py-2 px-3 text-right font-semibold">{apiScores.programs.toFixed(1)}</td>
-                    </tr>
-                    <tr>
-                      <td className="py-2 px-3 font-medium text-slate-800">12.1-2</td>
-                      <td className="py-2 px-3 text-slate-600">Teaching, Learning & Curriculum</td>
-                      <td className="py-2 px-3 text-right font-semibold">{apiScores.teaching.toFixed(1)}</td>
-                    </tr>
-                    <tr>
-                      <td className="py-2 px-3 font-medium text-slate-800">12.3-4</td>
-                      <td className="py-2 px-3 text-slate-600">Examination & Evaluation Duties</td>
-                      <td className="py-2 px-3 text-right font-semibold">{apiScores.examination.toFixed(1)}</td>
-                    </tr>
-                    <tr>
-                      <td className="py-2 px-3 font-medium text-slate-800">13</td>
-                      <td className="py-2 px-3 text-slate-600">Co-Curricular & Student/Inst. Activities</td>
-                      <td className="py-2 px-3 text-right font-semibold">{apiScores.activities.toFixed(1)}</td>
-                    </tr>
-                    <tr>
-                      <td className="py-2 px-3 font-medium text-slate-800">14-15</td>
-                      <td className="py-2 px-3 text-slate-600">Research Papers & Book Publications</td>
-                      <td className="py-2 px-3 text-right font-semibold">{apiScores.research.toFixed(1)}</td>
-                    </tr>
-                    <tr>
-                      <td className="py-2 px-3 font-medium text-slate-800">16</td>
-                      <td className="py-2 px-3 text-slate-600">Sponsored Projects & Consultancy</td>
-                      <td className="py-2 px-3 text-right font-semibold">{apiScores.projects.toFixed(1)}</td>
-                    </tr>
-                    <tr>
-                      <td className="py-2 px-3 font-medium text-slate-800">17</td>
-                      <td className="py-2 px-3 text-slate-600">Research Guidance (Ph.D./M.Tech)</td>
-                      <td className="py-2 px-3 text-right font-semibold">{apiScores.guidance.toFixed(1)}</td>
-                    </tr>
-                    <tr>
-                      <td className="py-2 px-3 font-medium text-slate-800">18-19</td>
-                      <td className="py-2 px-3 text-slate-600">Professional Memberships & Other Info</td>
-                      <td className="py-2 px-3 text-right font-semibold">{apiScores.other.toFixed(1)}</td>
-                    </tr>
-                    <tr className="bg-slate-50/80 font-bold text-[#1e3a5f] border-t-2 border-slate-300">
-                      <td colSpan={2} className="py-3 px-3 text-base">Grand Total Self-Assessed API Score</td>
-                      <td className="py-3 px-3 text-right text-base text-[#1e3a5f]">{apiScores.total.toFixed(1)}</td>
-                    </tr>
-                  </tbody>
-                </table>
+            {(errors.length > 0 || warnings.length > 0) && (
+              <div className="space-y-2">
+                {[...errors, ...warnings].map((issue, i) => {
+                  const tab = tabs.find((t) => t.id === issue.tab);
+                  return (
+                    <div key={i} className={`review-issue ${issue.level === 'error' ? 'is-error' : 'is-warning'}`}>
+                      {issue.level === 'error' ? <XCircle className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                      <span className="flex-1">{issue.message}</span>
+                      {tab && (
+                        <button
+                          type="button"
+                          className="review-issue-link"
+                          onClick={() => {
+                            setReviewOpen(false);
+                            navigate(tab.path);
+                          }}
+                        >
+                          Go to {tab.label}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
+            )}
+
+            <div className="border border-slate-200 rounded-lg overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-slate-100 text-slate-700 text-xs uppercase font-semibold">
+                  <tr>
+                    <th className="py-2.5 px-3">Item</th>
+                    <th className="py-2.5 px-3">Category</th>
+                    <th className="py-2.5 px-3 text-right">Claimed</th>
+                    <th className="py-2.5 px-3 text-right">Counted</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {apiScores.rows.map((r) => (
+                    <tr key={r.key}>
+                      <td className="py-2 px-3 font-medium text-slate-800 whitespace-nowrap">{r.item}</td>
+                      <td className="py-2 px-3 text-slate-600">
+                        {r.label}
+                        {r.cap !== undefined && <span className="text-slate-400"> (max {r.cap})</span>}
+                      </td>
+                      <td className="py-2 px-3 text-right">{r.claimed}</td>
+                      <td className={`py-2 px-3 text-right font-semibold ${r.claimed > r.counted ? 'text-amber-700' : ''}`}>{r.counted}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-slate-50/80 font-bold text-[#1e3a5f] border-t-2 border-slate-300">
+                    <td colSpan={2} className="py-3 px-3 text-base">
+                      Grand total self-assessed API score
+                    </td>
+                    <td className="py-3 px-3 text-right">{apiScores.claimedTotal}</td>
+                    <td className="py-3 px-3 text-right text-base">{apiScores.total}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
-            {/* Certification Notice */}
-            <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg text-xs text-amber-900 leading-relaxed">
-              <strong>Certification reminder:</strong> By submitting, you certify that the data entered is accurate and corresponds to your official academic performance during academic year 2023 - 2024.
-            </div>
+            <label className={`certification-box ${formData.certified ? 'is-checked' : ''}`}>
+              <input type="checkbox" checked={formData.certified} onChange={(e) => setCertified(e.target.checked)} />
+              <span>
+                I certify that the data entered is accurate and corresponds to my official academic performance during academic year {ayLabel}.
+              </span>
+            </label>
+
+            {submitError && (
+              <div className="review-issue is-error" role="alert">
+                <XCircle className="w-4 h-4 shrink-0" />
+                <span>{submitError}</span>
+              </div>
+            )}
           </div>
 
-          <DialogFooter className="flex flex-col sm:flex-row gap-2 justify-between">
+          <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:justify-between">
             <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handlePrint}
-              >
+              <Button type="button" variant="outline" size="sm" onClick={handlePrint}>
                 <Printer className="w-4 h-4 mr-1" />
                 Print
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={exportJSON}
-              >
+              <Button type="button" variant="outline" size="sm" onClick={exportJSON}>
                 <Download className="w-4 h-4 mr-1" />
-                Export JSON
+                Export
               </Button>
             </div>
             <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setReviewOpen(false)}
-              >
-                Continue Editing
+              <Button type="button" variant="ghost" size="sm" onClick={() => setReviewOpen(false)} disabled={submitting}>
+                Continue editing
               </Button>
               <Button
                 type="button"
                 size="sm"
                 className="bg-[#1e3a5f] hover:bg-[#2d5a87] text-white"
                 onClick={handleFinalSubmit}
+                disabled={submitting || errors.length > 0 || !formData.certified}
+                title={errors.length ? 'Fix the errors listed above first' : !formData.certified ? 'Tick the certification box first' : undefined}
               >
-                <Send className="w-4 h-4 mr-1" />
-                Confirm & Submit
+                {submitting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}
+                {submission ? 'Re-submit' : 'Confirm & Submit'}
               </Button>
             </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Submission Success Dialog */}
-      <Dialog open={submitSuccessOpen} onOpenChange={setSubmitSuccessOpen}>
+      {/* Success */}
+      <Dialog open={successOpen} onOpenChange={setSuccessOpen}>
         <DialogContent className="max-w-md bg-white border border-slate-200">
           <DialogHeader>
             <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-2">
               <CheckCircle2 className="w-6 h-6 text-emerald-600" />
             </div>
-            <DialogTitle className="text-center text-xl font-bold text-slate-800">
-              Assessment Submitted Successfully!
-            </DialogTitle>
-            <DialogDescription className="text-center text-sm text-slate-600">
-              Your Annual Self Assessment for <strong>2023 - 2024</strong> has been recorded and submitted for HoD and Directorate evaluation.
-            </DialogDescription>
+            <DialogTitle className="text-center text-xl font-bold text-slate-800">Assessment {submission?.mode === 'server' ? 'submitted' : 'finalised'}</DialogTitle>
+            <DialogDescription className="text-center text-sm text-slate-600">{successMessage}</DialogDescription>
           </DialogHeader>
 
           <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
-            <p><strong>Candidate:</strong> {formData.name}</p>
-            <p><strong>Department:</strong> {formData.department || 'CSE & IT'}</p>
-            <p><strong>Total API Reported:</strong> {apiScores.total.toFixed(1)} Points</p>
-            <p><strong>Submission Status:</strong> Ready for HoD Verification</p>
+            <p>
+              <strong>Faculty:</strong> {formData.name}
+            </p>
+            <p>
+              <strong>Department:</strong> {labelFor(departmentOptions, formData.department)}
+            </p>
+            <p>
+              <strong>Academic year:</strong> {ayLabel}
+            </p>
+            <p>
+              <strong>Total API counted:</strong> {apiScores.total} points
+            </p>
+            {submission?.id && (
+              <p>
+                <strong>Reference:</strong> {submission.id}
+              </p>
+            )}
           </div>
 
           <DialogFooter className="sm:justify-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handlePrint}
-            >
+            <Button type="button" variant="outline" onClick={handlePrint}>
               <Printer className="w-4 h-4 mr-1" />
-              Print Copy
+              Print copy
             </Button>
-            <Button
-              type="button"
-              className="bg-[#1e3a5f] hover:bg-[#2d5a87] text-white"
-              onClick={() => setSubmitSuccessOpen(false)}
-            >
+            <Button type="button" className="bg-[#1e3a5f] hover:bg-[#2d5a87] text-white" onClick={() => setSuccessOpen(false)}>
               Done
             </Button>
           </DialogFooter>
